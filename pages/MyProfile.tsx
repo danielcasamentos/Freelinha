@@ -139,6 +139,24 @@ const MyProfile: React.FC = () => {
 
       if (profileError) throw profileError;
 
+      // Geocode city/state/country to get coordinates for distance filtering
+      let lat: number | null = null;
+      let lng: number | null = null;
+      try {
+        const address = `${personalData.city}, ${personalData.state}, ${personalData.country}`;
+        const res = await fetch(
+          `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(address)}&format=json&limit=1`,
+          { headers: { 'Accept-Language': 'pt-BR' } }
+        );
+        const results = await res.json();
+        if (results.length > 0) {
+          lat = parseFloat(results[0].lat);
+          lng = parseFloat(results[0].lon);
+        }
+      } catch (geocodeErr) {
+        console.error('Erro de geocodificação ao salvar perfil:', geocodeErr);
+      }
+
       // 2. Update freelancer_profiles table
       const { error: freelaError } = await supabase
         .from('freelancer_profiles')
@@ -154,7 +172,8 @@ const MyProfile: React.FC = () => {
           portfolio_links: {
             instagram: professionalData.instagram,
             website: professionalData.website
-          }
+          },
+          ...(lat !== null && lng !== null ? { latitude: lat, longitude: lng } : {})
         });
 
       if (freelaError) throw freelaError;

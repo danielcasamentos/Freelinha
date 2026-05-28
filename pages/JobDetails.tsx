@@ -38,13 +38,35 @@ const JobDetails: React.FC = () => {
       if (jobError) throw jobError;
       setJob(jobData);
 
-      // Fetch Matches with profile details
-      const { data: matchesData } = await supabase
+      // Fetch matches first
+      const { data: matchesRaw, error: matchesError } = await supabase
         .from('matches')
-        .select('*, freelancer:profiles(*), freelancer_profile:freelancer_profiles(*)')
+        .select('*')
         .eq('job_id', id);
-      
-      setMatches(matchesData || []);
+
+      if (!matchesError && matchesRaw && matchesRaw.length > 0) {
+        // Enrich each match with profile + freelancer_profile
+        const enriched = await Promise.all(
+          matchesRaw.map(async (m) => {
+            const { data: profile } = await supabase
+              .from('profiles')
+              .select('*')
+              .eq('id', m.freelancer_id)
+              .single();
+
+            const { data: freelaProfile } = await supabase
+              .from('freelancer_profiles')
+              .select('*')
+              .eq('id', m.freelancer_id)
+              .single();
+
+            return { ...m, freelancer: profile, freelancer_profile: freelaProfile };
+          })
+        );
+        setMatches(enriched);
+      } else {
+        setMatches([]);
+      }
     } catch (err) {
       console.error('Error fetching job details:', err);
     } finally {

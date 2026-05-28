@@ -124,7 +124,7 @@ export const MOCK_FREELANCERS: Freelancer[] = [
     jobsCount: 45,
     avatarUrl: 'https://picsum.photos/200/200?random=2',
     reviews: [
-      { reviewerName: 'Agência Y', rating: 5, comment: 'Imagens incríveis.', date: '2023-11-01' }
+      { reviewerName: 'Agência Y', rating: 5, comment: 'Imagens incríveis.', showComment: true, date: '2023-11-01' }
     ]
   },
   {
@@ -194,7 +194,7 @@ export const MOCK_FREELANCERS: Freelancer[] = [
     jobsCount: 50,
     avatarUrl: 'https://picsum.photos/200/200?random=5',
     reviews: [
-      { reviewerName: 'StartUp Z', rating: 5, comment: 'Superou expectativas.', date: '2023-12-05' }
+      { reviewerName: 'StartUp Z', rating: 5, comment: 'Superou expectativas.', showComment: true, date: '2023-12-05' }
     ]
   },
   {

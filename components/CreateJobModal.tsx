@@ -36,16 +36,21 @@ const CreateJobModal: React.FC<CreateJobModalProps> = ({ isOpen, onClose }) => {
         throw new Error('Você precisa estar logado para publicar uma vaga.');
       }
 
-      // Geolocation Simulation (São Paulo coordinates by default, or Rio for Rio jobs)
-      let lat = -23.5505;
+      // Geocode the job location via Nominatim
+      let lat = -23.5505; // default SP center
       let lng = -46.6333;
-
-      if (formData.location.toLowerCase().includes('rio')) {
-        lat = -22.9068;
-        lng = -43.1729;
-      } else if (formData.location.toLowerCase().includes('bh') || formData.location.toLowerCase().includes('belo')) {
-        lat = -19.9167;
-        lng = -43.9333;
+      try {
+        const res = await fetch(
+          `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(formData.location + ', Brasil')}&format=json&limit=1`,
+          { headers: { 'Accept-Language': 'pt-BR' } }
+        );
+        const results = await res.json();
+        if (results.length > 0) {
+          lat = parseFloat(results[0].lat);
+          lng = parseFloat(results[0].lon);
+        }
+      } catch (geocodeErr) {
+        console.error('Erro de geocodificação ao criar vaga:', geocodeErr);
       }
 
       const { error: insertError } = await supabase

@@ -48,7 +48,7 @@ export interface Freelancer {
   minPrice: number; // For filtering
   maxPrice: number; // For filtering
   services: CustomService[];
-  disponibilidade: 'Disponível' | 'Ocupado';
+  disponibilidade: 'Disponível' | 'Ocupado' | 'Indisponível';
   rate: number;
   jobsCount: number;
   avatarUrl: string;
