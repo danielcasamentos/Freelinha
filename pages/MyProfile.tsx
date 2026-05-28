@@ -1,44 +1,114 @@
-
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Save, Plus, Trash2, Camera } from 'lucide-react';
+import { ArrowLeft, Save, Plus, Trash2, Camera, Lock, DollarSign } from 'lucide-react';
 import Input from '../components/Input';
 import Button from '../components/Button';
 import Select from '../components/Select';
 import { CustomService } from '../types';
 import { MAIN_ROLES, SPECIALTIES } from '../constants';
+import { supabase } from '../lib/supabase';
 
 const MyProfile: React.FC = () => {
   const navigate = useNavigate();
+  const [loading, setLoading] = useState(true);
+  const [saveLoading, setSaveLoading] = useState(false);
+  const [currentUser, setCurrentUser] = useState<any>(null);
 
-  // Mock initial state
-  const [formData, setFormData] = useState({
-    nomeCompleto: 'João Silva',
-    username: 'joao_editor',
-    email: 'joao@email.com',
-    whatsapp: '11999999999',
-    funcaoPrincipal: 'Editor de Vídeo',
-    specialties: ['Casamento', 'Corporativo'],
-    regiao: 'São Paulo, SP',
-    bio: 'Editor com 5 anos de experiência em Premiere e DaVinci Resolve.',
-    instagram: 'https://instagram.com/joao_editor',
-    website: 'https://joaoeditor.com',
+  // Form states
+  const [personalData, setPersonalData] = useState({
+    firstName: '',
+    lastName: '',
+    email: '',
+    phone: '',
+    city: '',
+    state: '',
+    country: '',
+    role: 'Produtor'
   });
 
-  const [services, setServices] = useState<CustomService[]>([
-    { name: 'Diária de Edição', price: 'R$ 800' },
-    { name: 'Color Grading (Curta)', price: 'R$ 1200' }
-  ]);
+  const [professionalData, setProfessionalData] = useState({
+    bio: '',
+    specialties: [] as string[],
+    minPrice: 0,
+    maxPrice: 0,
+    currency: 'BRL',
+    disponibilidade: 'Disponível',
+    instagram: '',
+    website: ''
+  });
 
-  const [newService, setNewService] = useState({ name: '', price: '' });
+  const fetchProfileData = async () => {
+    try {
+      setLoading(true);
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        navigate('/');
+        return;
+      }
+      setCurrentUser(user);
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
+      // Fetch from profiles
+      const { data: profile, error: profileError } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', user.id)
+        .single();
+      
+      if (profileError) throw profileError;
+
+      setPersonalData({
+        firstName: profile.first_name || '',
+        lastName: profile.last_name || '',
+        email: user.email || '',
+        phone: profile.phone || '',
+        city: profile.city || '',
+        state: profile.state || '',
+        country: profile.country || '',
+        role: profile.role || 'Produtor'
+      });
+
+      // Fetch from freelancer_profiles
+      const { data: freelaProfile } = await supabase
+        .from('freelancer_profiles')
+        .select('*')
+        .eq('id', user.id)
+        .single();
+
+      if (freelaProfile) {
+        setProfessionalData({
+          bio: freelaProfile.bio || '',
+          specialties: freelaProfile.specialties || [],
+          minPrice: Number(freelaProfile.min_price || 0),
+          maxPrice: Number(freelaProfile.max_price || 0),
+          currency: freelaProfile.currency || 'BRL',
+          disponibilidade: freelaProfile.disponibilidade || 'Disponível',
+          instagram: freelaProfile.portfolio_links?.instagram || '',
+          website: freelaProfile.portfolio_links?.website || ''
+        });
+      }
+    } catch (err) {
+      console.error('Error loading profile data:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchProfileData();
+  }, []);
+
+  const handlePersonalChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
+    setPersonalData(prev => ({ ...prev, [name]: value }));
+  };
+
+  const handleProfessionalChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
+    const { name, value } = e.target;
+    setProfessionalData(prev => ({ ...prev, [name]: name.includes('Price') ? Number(value) : value }));
   };
 
   const toggleSpecialty = (spec: string) => {
-    setFormData(prev => {
+    setProfessionalData(prev => {
       const current = prev.specialties || [];
       if (current.includes(spec)) {
         return { ...prev, specialties: current.filter(s => s !== spec) };
@@ -48,22 +118,67 @@ const MyProfile: React.FC = () => {
     });
   };
 
-  const handleAddService = () => {
-    if (newService.name && newService.price) {
-      setServices([...services, newService]);
-      setNewService({ name: '', price: '' });
+  const handleSave = async () => {
+    if (!currentUser) return;
+    try {
+      setSaveLoading(true);
+
+      // 1. Update profiles table
+      const { error: profileError } = await supabase
+        .from('profiles')
+        .update({
+          first_name: personalData.firstName,
+          last_name: personalData.lastName,
+          phone: personalData.phone,
+          city: personalData.city,
+          state: personalData.state,
+          country: personalData.country,
+          role: personalData.role
+        })
+        .eq('id', currentUser.id);
+
+      if (profileError) throw profileError;
+
+      // 2. Update freelancer_profiles table
+      const { error: freelaError } = await supabase
+        .from('freelancer_profiles')
+        .upsert({
+          id: currentUser.id,
+          bio: professionalData.bio,
+          funcoes: [personalData.role],
+          specialties: professionalData.specialties,
+          min_price: professionalData.minPrice,
+          max_price: professionalData.maxPrice,
+          currency: professionalData.currency,
+          disponibilidade: professionalData.disponibilidade,
+          portfolio_links: {
+            instagram: professionalData.instagram,
+            website: professionalData.website
+          }
+        });
+
+      if (freelaError) throw freelaError;
+
+      alert('Perfil atualizado com sucesso!');
+      navigate('/explore');
+    } catch (err: any) {
+      console.error(err);
+      alert('Erro ao salvar perfil: ' + err.message);
+    } finally {
+      setSaveLoading(false);
     }
   };
 
-  const handleRemoveService = (index: number) => {
-    setServices(services.filter((_, i) => i !== index));
-  };
-
-  const handleSave = () => {
-    // In a real app, this would send data to backend
-    alert('Perfil atualizado com sucesso!');
-    navigate('/feed');
-  };
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-[#121212] flex items-center justify-center text-white">
+        <div className="text-center space-y-4">
+          <div className="w-12 h-12 border-t-2 border-[#8A2BE2] rounded-full animate-spin mx-auto"></div>
+          <p className="text-sm font-bold uppercase tracking-widest text-gray-500">Buscando seu perfil...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-[100dvh] bg-[#121212] pb-24">
@@ -71,7 +186,7 @@ const MyProfile: React.FC = () => {
       <div className="sticky top-0 z-30 bg-[#121212]/95 backdrop-blur-md border-b border-gray-800 px-4 py-4 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <button 
-            onClick={() => navigate('/feed')}
+            onClick={() => navigate('/explore')}
             className="text-gray-400 hover:text-white transition-colors"
           >
             <ArrowLeft size={24} />
@@ -80,10 +195,11 @@ const MyProfile: React.FC = () => {
         </div>
         <button 
           onClick={handleSave}
+          disabled={saveLoading}
           className="text-[#8A2BE2] font-semibold text-sm hover:text-white transition-colors flex items-center gap-1"
         >
           <Save size={18} />
-          Salvar
+          {saveLoading ? 'Salvando...' : 'Salvar'}
         </button>
       </div>
 
@@ -91,20 +207,17 @@ const MyProfile: React.FC = () => {
         
         {/* Avatar Section */}
         <div className="flex flex-col items-center gap-4">
-          <div className="relative group cursor-pointer">
+          <div className="relative group">
             <img 
-              src="https://picsum.photos/200/200?random=1" 
+              src={currentUser?.user_metadata?.avatar_url || "https://picsum.photos/200/200?random=1"} 
               alt="Avatar" 
               className="w-24 h-24 rounded-full object-cover border-2 border-[#8A2BE2]"
             />
-            <div className="absolute inset-0 bg-black/50 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-              <Camera className="text-white" size={24} />
-            </div>
           </div>
           <div className="text-center w-full">
-             <label className="text-xs text-gray-500 uppercase font-semibold block mb-1">Seu Link Personalizado</label>
-             <div className="bg-[#1A1A1A] py-2 px-3 rounded-lg border border-gray-800 text-gray-400 text-sm truncate">
-               freelinha.com/profile/<span className="text-white font-medium">{formData.username}</span>
+             <label className="text-xs text-gray-500 uppercase font-semibold block mb-1">Seu Nome de Usuário</label>
+             <div className="bg-[#1A1A1A] py-2.5 px-3 rounded-lg border border-gray-800 text-gray-400 text-sm truncate">
+               @{currentUser?.user_metadata?.username || 'freelancer'}
              </div>
           </div>
         </div>
@@ -112,25 +225,57 @@ const MyProfile: React.FC = () => {
         {/* Personal Data */}
         <section className="space-y-4">
           <h2 className="text-lg font-bold text-white border-b border-gray-800 pb-2">Dados Pessoais</h2>
-          <Input 
-            label="Nome Completo" 
-            name="nomeCompleto"
-            value={formData.nomeCompleto}
-            onChange={handleInputChange}
-          />
-          <Input 
-            label="Email" 
-            type="email"
-            name="email"
-            value={formData.email}
-            onChange={handleInputChange}
-          />
+          <div className="grid grid-cols-2 gap-3">
+            <Input 
+              label="Nome" 
+              name="firstName"
+              value={personalData.firstName}
+              onChange={handlePersonalChange}
+            />
+            <Input 
+              label="Sobrenome" 
+              name="lastName"
+              value={personalData.lastName}
+              onChange={handlePersonalChange}
+            />
+          </div>
+          <div className="relative">
+            <Input 
+              label="Email (Não alterável)" 
+              type="email"
+              name="email"
+              value={personalData.email}
+              disabled
+              className="text-gray-500 cursor-not-allowed"
+            />
+            <Lock size={16} className="absolute right-3 top-[38px] text-gray-600" />
+          </div>
           <Input 
             label="Whatsapp / Celular" 
             placeholder="(11) 99999-9999"
-            name="whatsapp"
-            value={formData.whatsapp}
-            onChange={handleInputChange}
+            name="phone"
+            value={personalData.phone}
+            onChange={handlePersonalChange}
+          />
+          <div className="grid grid-cols-2 gap-3">
+            <Input 
+              label="Cidade" 
+              name="city"
+              value={personalData.city}
+              onChange={handlePersonalChange}
+            />
+            <Input 
+              label="Estado" 
+              name="state"
+              value={personalData.state}
+              onChange={handlePersonalChange}
+            />
+          </div>
+          <Input 
+            label="País" 
+            name="country"
+            value={personalData.country}
+            onChange={handlePersonalChange}
           />
         </section>
 
@@ -140,15 +285,47 @@ const MyProfile: React.FC = () => {
           
           <Select 
             label="Função Principal"
-            name="funcaoPrincipal"
-            value={formData.funcaoPrincipal}
-            onChange={handleInputChange}
+            name="role"
+            value={personalData.role}
+            onChange={handlePersonalChange}
           >
             <option value="">Selecione sua função...</option>
             {MAIN_ROLES.map(role => (
               <option key={role} value={role}>{role}</option>
             ))}
           </Select>
+          
+          <Select 
+            label="Disponibilidade"
+            name="disponibilidade"
+            value={professionalData.disponibilidade}
+            onChange={handleProfessionalChange}
+          >
+            <option value="Disponível">Disponível</option>
+            <option value="Ocupado">Ocupado</option>
+            <option value="Indisponível">Indisponível</option>
+          </Select>
+
+          {/* Price Range Settings */}
+          <div className="space-y-3">
+            <label className="block text-sm font-medium text-gray-400">Faixa de Preço Cobrado (Por Dia / Evento)</label>
+            <div className="grid grid-cols-2 gap-3">
+              <Input 
+                type="number"
+                label="Valor Mínimo (R$)"
+                name="minPrice"
+                value={professionalData.minPrice}
+                onChange={handleProfessionalChange}
+              />
+              <Input 
+                type="number"
+                label="Valor Máximo (R$)"
+                name="maxPrice"
+                value={professionalData.maxPrice}
+                onChange={handleProfessionalChange}
+              />
+            </div>
+          </div>
           
           <div className="space-y-2">
             <label className="block text-sm font-medium text-gray-400">Especialidades / Nichos</label>
@@ -160,7 +337,7 @@ const MyProfile: React.FC = () => {
                   onClick={() => toggleSpecialty(spec)}
                   className={`
                     text-xs px-3 py-2 rounded-lg border transition-all
-                    ${formData.specialties.includes(spec)
+                    ${professionalData.specialties.includes(spec)
                       ? 'bg-[#8A2BE2] border-[#8A2BE2] text-white shadow-lg' 
                       : 'bg-[#1A1A1A] border-gray-800 text-gray-400 hover:border-gray-600'}
                   `}
@@ -170,21 +347,13 @@ const MyProfile: React.FC = () => {
               ))}
             </div>
           </div>
-
-          <Input 
-            label="Região (Cidade/Estado)" 
-            placeholder="Ex: São Paulo, SP"
-            name="regiao"
-            value={formData.regiao}
-            onChange={handleInputChange}
-          />
           
           <div className="space-y-2">
             <label className="block text-sm font-medium text-gray-400">Biografia</label>
             <textarea 
               name="bio"
-              value={formData.bio}
-              onChange={handleInputChange}
+              value={professionalData.bio}
+              onChange={handleProfessionalChange}
               rows={4}
               className="w-full bg-[#1A1A1A] border border-gray-800 text-white rounded-lg p-3 placeholder-gray-600 focus:outline-none focus:border-[#8A2BE2] transition-all"
               placeholder="Conte um pouco sobre sua experiência..."
@@ -192,83 +361,28 @@ const MyProfile: React.FC = () => {
           </div>
         </section>
 
-        {/* Services & Custom Rates */}
-        <section className="space-y-4">
-          <div className="flex justify-between items-center border-b border-gray-800 pb-2">
-             <h2 className="text-lg font-bold text-white">Serviços e Valores</h2>
-             <span className="text-xs text-[#8A2BE2] bg-[#8A2BE2]/10 px-2 py-0.5 rounded-full">Personalizado</span>
-          </div>
-          <p className="text-sm text-gray-400">
-            Defina os serviços que você oferece e o valor (ou faixa de valor) que deseja cobrar.
-          </p>
-
-          <div className="space-y-3">
-            {services.map((service, index) => (
-              <div key={index} className="flex items-center gap-3 bg-[#1A1A1A] p-3 rounded-lg border border-gray-800">
-                <div className="flex-1">
-                  <p className="font-medium text-white">{service.name}</p>
-                  <p className="text-[#8A2BE2] text-sm">{service.price}</p>
-                </div>
-                <button 
-                  onClick={() => handleRemoveService(index)}
-                  className="text-gray-500 hover:text-[#E3170D] transition-colors"
-                >
-                  <Trash2 size={18} />
-                </button>
-              </div>
-            ))}
-          </div>
-
-          <div className="p-4 bg-[#1A1A1A]/50 border border-dashed border-gray-700 rounded-lg space-y-3">
-            <h3 className="text-sm font-medium text-white">Adicionar Novo Serviço</h3>
-            <div className="grid grid-cols-2 gap-3">
-              <Input 
-                placeholder="Ex: Diária Drone" 
-                value={newService.name}
-                onChange={(e) => setNewService(prev => ({ ...prev, name: e.target.value }))}
-                className="text-sm"
-              />
-              <Input 
-                placeholder="Ex: R$ 1500" 
-                value={newService.price}
-                onChange={(e) => setNewService(prev => ({ ...prev, price: e.target.value }))}
-                className="text-sm"
-              />
-            </div>
-            <Button 
-              type="button" 
-              variant="outline" 
-              fullWidth 
-              onClick={handleAddService}
-              disabled={!newService.name || !newService.price}
-            >
-              <Plus size={16} /> Adicionar
-            </Button>
-          </div>
-        </section>
-
         {/* Socials */}
         <section className="space-y-4">
           <h2 className="text-lg font-bold text-white border-b border-gray-800 pb-2">Redes Sociais</h2>
           <Input 
-            label="Instagram" 
+            label="Instagram URL" 
             placeholder="https://instagram.com/..."
             name="instagram"
-            value={formData.instagram}
-            onChange={handleInputChange}
+            value={professionalData.instagram}
+            onChange={handleProfessionalChange}
           />
           <Input 
             label="Website / Portfólio" 
             placeholder="https://seu-site.com"
             name="website"
-            value={formData.website}
-            onChange={handleInputChange}
+            value={professionalData.website}
+            onChange={handleProfessionalChange}
           />
         </section>
 
         <div className="pt-4">
-          <Button onClick={handleSave} fullWidth>
-            Salvar Alterações
+          <Button onClick={handleSave} disabled={saveLoading} fullWidth className="bg-[#8A2BE2] hover:bg-[#9D4EDD]">
+            {saveLoading ? 'Salvando Alterações...' : 'Salvar Alterações'}
           </Button>
         </div>
 

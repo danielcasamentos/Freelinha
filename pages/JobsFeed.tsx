@@ -1,11 +1,10 @@
-
 import React, { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
     Search, MapPin, Briefcase, Filter, Plus, Info, CheckCircle2, 
-    Sparkles, LayoutGrid, Users, ShieldCheck, Star, Lock 
+    Sparkles, LayoutGrid, Users, ShieldCheck, Star, Lock, PhoneOff
 } from 'lucide-react';
-import { MOCK_VACANCIES, MOCK_FREELANCERS, CURRENT_USER } from '../constants';
+import { supabase } from '../lib/supabase';
 import BottomNav from '../components/BottomNav';
 import Input from '../components/Input';
 import Button from '../components/Button';
@@ -29,14 +28,69 @@ const Explore: React.FC = () => {
   const navigate = useNavigate();
   const [searchTerm, setSearchTerm] = useState('');
   const [radius, setRadius] = useState(50); // km
-  const [interestedJobs, setInterestedJobs] = useState<string[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'vagas' | 'profissionais' | 'minhas'>('vagas');
   
+  // Real Database States
+  const [currentUser, setCurrentUser] = useState<any>(null);
+  const [vacancies, setVacancies] = useState<any[]>([]);
+  const [freelancers, setFreelancers] = useState<any[]>([]);
+  const [myMatches, setMyMatches] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
   // GPS State
   const [userLocation, setUserLocation] = useState<{lat: number, lng: number} | null>(null);
   const [isLocating, setIsLocating] = useState(false);
   const [locationError, setLocationError] = useState<string | null>(null);
+
+  const fetchCurrentUserAndData = async () => {
+    try {
+      setLoading(true);
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      if (!user) {
+        navigate('/');
+        return;
+      }
+
+      // Fetch Profile
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', user.id)
+        .single();
+      
+      setCurrentUser(profile);
+
+      // Fetch Jobs (Vagas)
+      const { data: jobs } = await supabase
+        .from('jobs')
+        .select('*, author:profiles(*)');
+      setVacancies(jobs || []);
+
+      // Fetch Freelancers
+      const { data: freelas } = await supabase
+        .from('freelancer_profiles')
+        .select('*, profile:profiles(*)');
+      setFreelancers(freelas || []);
+
+      // Fetch Matches where this user is the freelancer
+      const { data: matches } = await supabase
+        .from('matches')
+        .select('*')
+        .eq('freelancer_id', user.id);
+      setMyMatches(matches || []);
+
+    } catch (err) {
+      console.error('Error fetching data from Supabase:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchCurrentUserAndData();
+  }, []);
 
   const requestLocation = () => {
     setIsLocating(true);
@@ -64,7 +118,7 @@ const Explore: React.FC = () => {
 
   // Filtering Logic for Jobs
   const filteredJobs = useMemo(() => {
-    return MOCK_VACANCIES.filter(job => {
+    return vacancies.filter(job => {
       const matchesSearch = 
         job.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
         job.role.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -74,46 +128,86 @@ const Explore: React.FC = () => {
       if (!matchesSearch) return false;
 
       // GPS Distance Filter
-      if (userLocation && job.coordinates) {
-        const distance = getDistance(userLocation.lat, userLocation.lng, job.coordinates.lat, job.coordinates.lng);
+      if (userLocation && job.latitude && job.longitude) {
+        const distance = getDistance(userLocation.lat, userLocation.lng, job.latitude, job.longitude);
         if (distance > radius) return false;
       }
 
       return true;
     });
-  }, [searchTerm, userLocation, radius]);
+  }, [searchTerm, userLocation, radius, vacancies]);
 
   // Filtering Logic for Freelancers
   const filteredFreelancers = useMemo(() => {
-    return MOCK_FREELANCERS.filter(f => {
+    return freelancers.filter(f => {
+      const nomeCompleto = `${f.profile?.first_name || ''} ${f.profile?.last_name || ''}`;
       const matchesSearch = 
-        f.nomeCompleto.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        f.funcoes.some(role => role.toLowerCase().includes(searchTerm.toLowerCase()));
+        nomeCompleto.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (f.funcoes && f.funcoes.some((role: string) => role.toLowerCase().includes(searchTerm.toLowerCase())));
         
       if (!matchesSearch) return false;
 
       // GPS Distance Filter
-      if (userLocation && f.coordinates) {
-        const distance = getDistance(userLocation.lat, userLocation.lng, f.coordinates.lat, f.coordinates.lng);
+      if (userLocation && f.latitude && f.longitude) {
+        const distance = getDistance(userLocation.lat, userLocation.lng, f.latitude, f.longitude);
         if (distance > radius) return false;
       }
 
+      // Hide current user from freelancer search list
+      if (currentUser && f.id === currentUser.id) return false;
+
       return true;
     });
-  }, [searchTerm, userLocation, radius]);
+  }, [searchTerm, userLocation, radius, freelancers, currentUser]);
 
   const eliteFreelancers = useMemo(() => {
-    return MOCK_FREELANCERS.filter(f => f.rate >= 4.8).slice(0, 5);
-  }, []);
+    return freelancers
+      .filter(f => f.rate >= 4.8 && (currentUser ? f.id !== currentUser.id : true))
+      .slice(0, 5);
+  }, [freelancers, currentUser]);
 
-  const handleInterest = (e: React.MouseEvent, jobId: string) => {
+  const handleInterest = async (e: React.MouseEvent, jobId: string) => {
     e.stopPropagation();
-    if (!interestedJobs.includes(jobId)) {
-      setInterestedJobs([...interestedJobs, jobId]);
+    if (!currentUser) return;
+
+    const alreadyInterested = myMatches.some(m => m.job_id === jobId);
+    if (alreadyInterested) return;
+
+    try {
+      const { data, error } = await supabase
+        .from('matches')
+        .insert({
+          job_id: jobId,
+          freelancer_id: currentUser.id,
+          status: 'Pending'
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+      setMyMatches([...myMatches, data]);
+      alert('Seu interesse foi enviado ao produtor! Aguardando Match.');
+    } catch (err) {
+      console.error('Error expressing interest:', err);
+      alert('Não foi possível registrar o interesse.');
     }
   };
 
-  const myJobs = MOCK_VACANCIES.filter(v => v.authorId === 'user_123' || v.authorId === 'me');
+  const myJobs = useMemo(() => {
+    if (!currentUser) return [];
+    return vacancies.filter(v => v.author_id === currentUser.id);
+  }, [vacancies, currentUser]);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-[#121212] flex items-center justify-center text-white">
+        <div className="text-center space-y-4">
+          <div className="w-12 h-12 border-t-2 border-[#8A2BE2] rounded-full animate-spin mx-auto"></div>
+          <p className="text-sm font-bold uppercase tracking-widest text-gray-500">Buscando informações do Supabase...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-[100dvh] bg-[#121212] pb-32">
@@ -159,7 +253,10 @@ const Explore: React.FC = () => {
 
       <CreateJobModal 
         isOpen={isModalOpen} 
-        onClose={() => setIsModalOpen(false)} 
+        onClose={() => {
+          setIsModalOpen(false);
+          fetchCurrentUserAndData();
+        }} 
       />
 
       <main className="px-6 py-8 space-y-10 max-w-2xl mx-auto animate-in fade-in duration-500">
@@ -216,7 +313,12 @@ const Explore: React.FC = () => {
                     </div>
 
                     <div className="space-y-4">
-                        {filteredJobs.map(job => (
+                        {filteredJobs.map(job => {
+                          const interestMatch = myMatches.find(m => m.job_id === job.id);
+                          const isMatched = interestMatch?.status === 'Accepted';
+                          const isPending = interestMatch?.status === 'Pending';
+                          
+                          return (
                             <div key={job.id} onClick={() => navigate(`/jobs/${job.id}`)} className="group bg-[#1A1A1A] border border-white/5 rounded-[32px] p-6 transition-all duration-500 hover:border-[#8A2BE2]/30 hover:bg-[#222] shadow-2xl cursor-pointer">
                                 <div className="flex justify-between items-start">
                                     <div className="space-y-1">
@@ -234,15 +336,27 @@ const Explore: React.FC = () => {
                                 </div>
                                 <div className="mt-6 pt-6 border-t border-white/5 flex items-center justify-between">
                                     <div className="flex items-center gap-2 text-xs text-gray-500 font-bold">
-                                        <div className="w-8 h-8 bg-white/10 rounded-xl flex items-center justify-center font-black text-[10px]">{job.authorName.charAt(0)}</div>
-                                        {job.authorName}
+                                        <div className="w-8 h-8 bg-white/10 rounded-xl flex items-center justify-center font-black text-[10px]">
+                                          {(job.author?.first_name || 'U').charAt(0)}
+                                        </div>
+                                        {job.author ? `${job.author.first_name} ${job.author.last_name}` : 'Usuário'}
                                     </div>
-                                    <button onClick={(e) => handleInterest(e, job.id)} className={`px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all ${interestedJobs.includes(job.id) ? 'bg-green-500/10 text-green-400' : 'bg-white text-black hover:bg-[#8A2BE2] hover:text-white shadow-lg'}`}>
-                                        {interestedJobs.includes(job.id) ? 'MATCH!' : 'TENHO INTERESSE'}
+                                    <button 
+                                      onClick={(e) => handleInterest(e, job.id)} 
+                                      disabled={!!interestMatch}
+                                      className={`px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all 
+                                        ${isMatched 
+                                          ? 'bg-green-500/10 text-green-400 border border-green-500/20' 
+                                          : isPending 
+                                            ? 'bg-[#8A2BE2]/10 text-[#8A2BE2] border border-[#8A2BE2]/20' 
+                                            : 'bg-white text-black hover:bg-[#8A2BE2] hover:text-white shadow-lg'}`}
+                                    >
+                                        {isMatched ? 'MATCH CONCLUÍDO!' : isPending ? 'INTERESSE ENVIADO' : 'TENHO INTERESSE'}
                                     </button>
                                 </div>
                             </div>
-                        ))}
+                          );
+                        })}
                     </div>
                 </div>
             </>
@@ -252,30 +366,35 @@ const Explore: React.FC = () => {
         {activeTab === 'profissionais' && (
             <div className="space-y-10">
                 {/* Elite Section */}
-                <section className="space-y-6">
-                    <div className="flex items-center justify-between px-2">
-                        <div className="flex items-center gap-2">
-                            <ShieldCheck size={18} className="text-[#8A2BE2]" />
-                            <h2 className="text-[10px] font-black text-white uppercase tracking-widest">Sugestões de Elite</h2>
-                        </div>
-                    </div>
-                    <div className="relative">
-                        <div className="flex gap-4 overflow-x-auto pb-4 scrollbar-hide">
-                            {eliteFreelancers.map(f => (
-                                <div key={f.id} onClick={() => navigate(`/profile/${f.username}`)} className="min-w-[160px] bg-white/5 border border-white/5 rounded-[32px] p-5 flex flex-col items-center gap-3 cursor-pointer hover:bg-white/10 transition-all">
-                                    <div className="relative">
-                                        <img src={f.avatarUrl} alt="" className="w-16 h-16 rounded-full object-cover border-2 border-[#8A2BE2]" />
-                                        <div className="absolute -top-1 -right-1 bg-[#8A2BE2] p-1 rounded-full border-2 border-[#121212]"><Star size={10} fill="white" color="white" /></div>
+                {eliteFreelancers.length > 0 && (
+                  <section className="space-y-6">
+                      <div className="flex items-center justify-between px-2">
+                          <div className="flex items-center gap-2">
+                              <ShieldCheck size={18} className="text-[#8A2BE2]" />
+                              <h2 className="text-[10px] font-black text-white uppercase tracking-widest">Sugestões de Elite</h2>
+                          </div>
+                      </div>
+                      <div className="relative">
+                          <div className="flex gap-4 overflow-x-auto pb-4 scrollbar-hide">
+                              {eliteFreelancers.map(f => {
+                                  const name = `${f.profile?.first_name || ''} ${f.profile?.last_name || ''}`;
+                                  return (
+                                    <div key={f.id} onClick={() => navigate(`/profile/${f.profile?.username}`)} className="min-w-[160px] bg-white/5 border border-white/5 rounded-[32px] p-5 flex flex-col items-center gap-3 cursor-pointer hover:bg-white/10 transition-all">
+                                        <div className="relative">
+                                            <img src={f.profile?.avatar_url || 'https://picsum.photos/200/200?random=1'} alt="" className="w-16 h-16 rounded-full object-cover border-2 border-[#8A2BE2]" />
+                                            <div className="absolute -top-1 -right-1 bg-[#8A2BE2] p-1 rounded-full border-2 border-[#121212]"><Star size={10} fill="white" color="white" /></div>
+                                        </div>
+                                        <div className="text-center">
+                                            <h4 className="text-xs font-black text-white truncate w-[120px]">{name}</h4>
+                                            <p className="text-[9px] text-[#8A2BE2] font-bold uppercase mt-0.5">{f.funcoes?.[0] || 'Profissional'}</p>
+                                        </div>
                                     </div>
-                                    <div className="text-center">
-                                        <h4 className="text-xs font-black text-white truncate w-[120px]">{f.nomeCompleto}</h4>
-                                        <p className="text-[9px] text-[#8A2BE2] font-bold uppercase mt-0.5">{f.funcoes[0]}</p>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-                </section>
+                                  );
+                              })}
+                          </div>
+                      </div>
+                  </section>
+                )}
 
                 <div className="space-y-6">
                     <div className="flex items-center justify-between px-2">
@@ -283,7 +402,31 @@ const Explore: React.FC = () => {
                         <span className="text-xs font-medium text-[#8A2BE2]">{filteredFreelancers.length} encontrados</span>
                     </div>
                     <div className="space-y-2">
-                        {filteredFreelancers.map(f => <FreelancerCard key={f.id} freelancer={f} />)}
+                        {filteredFreelancers.map(f => (
+                          <FreelancerCard 
+                            key={f.id} 
+                            freelancer={{
+                              id: f.id,
+                              username: f.profile?.username,
+                              nomeCompleto: `${f.profile?.first_name} ${f.profile?.last_name}`,
+                              funcoes: f.funcoes,
+                              specialties: f.specialties,
+                              regiao: `${f.profile?.city}, ${f.profile?.state}`,
+                              bio: f.bio,
+                              portfolioLinks: f.portfolio_links || {},
+                              whatsapp: 'Oculto até Match', // Hidden by default on list
+                              faixaValor: `${f.min_price} - ${f.max_price} / Dia`,
+                              currency: f.currency,
+                              minPrice: f.min_price,
+                              maxPrice: f.max_price,
+                              services: [],
+                              disponibilidade: f.disponibilidade,
+                              rate: f.rate,
+                              jobsCount: f.jobs_count,
+                              avatarUrl: f.profile?.avatar_url
+                            }} 
+                          />
+                        ))}
                     </div>
                 </div>
             </div>
@@ -300,7 +443,7 @@ const Explore: React.FC = () => {
                         <div className="space-y-1">
                             <h3 className="text-lg font-black text-white group-hover:text-[#8A2BE2] transition-colors">{job.title}</h3>
                             <div className="flex items-center gap-4 text-xs font-bold text-gray-500">
-                                <div className="flex items-center gap-1"><Users size={14} /><span>Sugestões Prontas</span></div>
+                                <div className="flex items-center gap-1"><Users size={14} /><span>Clique para ver Interessados</span></div>
                                 <div className="flex items-center gap-1"><LayoutGrid size={14} /><span>{job.status}</span></div>
                             </div>
                         </div>

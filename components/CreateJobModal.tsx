@@ -1,8 +1,9 @@
-
 import React, { useState } from 'react';
 import { X, MapPin, DollarSign, FileText, Camera, Check } from 'lucide-react';
 import Button from './Button';
 import Input from './Input';
+import { supabase } from '../lib/supabase';
+import { MAIN_ROLES } from '../constants';
 
 interface CreateJobModalProps {
   isOpen: boolean;
@@ -11,6 +12,8 @@ interface CreateJobModalProps {
 
 const CreateJobModal: React.FC<CreateJobModalProps> = ({ isOpen, onClose }) => {
   const [step, setStep] = useState(1);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     title: '',
     type: '',
@@ -22,14 +25,65 @@ const CreateJobModal: React.FC<CreateJobModalProps> = ({ isOpen, onClose }) => {
 
   if (!isOpen) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // Simulate API call
-    setStep(3);
-    setTimeout(() => {
+    setLoading(true);
+    setError(null);
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        throw new Error('Você precisa estar logado para publicar uma vaga.');
+      }
+
+      // Geolocation Simulation (São Paulo coordinates by default, or Rio for Rio jobs)
+      let lat = -23.5505;
+      let lng = -46.6333;
+
+      if (formData.location.toLowerCase().includes('rio')) {
+        lat = -22.9068;
+        lng = -43.1729;
+      } else if (formData.location.toLowerCase().includes('bh') || formData.location.toLowerCase().includes('belo')) {
+        lat = -19.9167;
+        lng = -43.9333;
+      }
+
+      const { error: insertError } = await supabase
+        .from('jobs')
+        .insert({
+          title: formData.title,
+          type: formData.type || 'Casamento',
+          role: formData.role || 'Videomaker',
+          location: formData.location || 'São Paulo, SP',
+          latitude: lat,
+          longitude: lng,
+          value: formData.value || 'R$ 1.000',
+          description: formData.description,
+          author_id: user.id,
+          status: 'Open'
+        });
+
+      if (insertError) throw insertError;
+
+      setStep(3);
+      setTimeout(() => {
         onClose();
         setStep(1);
-    }, 2000);
+        setFormData({
+          title: '',
+          type: '',
+          role: '',
+          location: '',
+          value: '',
+          description: ''
+        });
+      }, 2000);
+    } catch (err: any) {
+      console.error(err);
+      setError(err.message || 'Erro ao publicar a vaga.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -55,6 +109,12 @@ const CreateJobModal: React.FC<CreateJobModalProps> = ({ isOpen, onClose }) => {
             </button>
           </div>
 
+          {error && (
+            <div className="bg-red-500/10 border border-red-500/20 text-red-400 p-3 rounded-xl text-xs font-bold text-center mb-4">
+              {error}
+            </div>
+          )}
+
           {step === 1 && (
             <div className="space-y-6 animate-in slide-in-from-right duration-300">
               <div className="space-y-4">
@@ -63,6 +123,7 @@ const CreateJobModal: React.FC<CreateJobModalProps> = ({ isOpen, onClose }) => {
                   placeholder="Ex: Casamento na Praia, Vídeo Institucional..."
                   value={formData.title}
                   onChange={(e) => setFormData({...formData, title: e.target.value})}
+                  required
                 />
                 <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
@@ -87,14 +148,14 @@ const CreateJobModal: React.FC<CreateJobModalProps> = ({ isOpen, onClose }) => {
                             onChange={(e) => setFormData({...formData, role: e.target.value})}
                         >
                             <option value="">Selecione...</option>
-                            <option value="Fotógrafo">Fotógrafo</option>
-                            <option value="Videomaker">Videomaker</option>
-                            <option value="Drone">Drone</option>
+                            {MAIN_ROLES.map(role => (
+                              <option key={role} value={role}>{role}</option>
+                            ))}
                         </select>
                     </div>
                 </div>
               </div>
-              <Button fullWidth onClick={() => setStep(2)} disabled={!formData.title}>Próximo Passo</Button>
+              <Button fullWidth onClick={() => setStep(2)} disabled={!formData.title || !formData.type || !formData.role}>Próximo Passo</Button>
             </div>
           )}
 
@@ -107,6 +168,7 @@ const CreateJobModal: React.FC<CreateJobModalProps> = ({ isOpen, onClose }) => {
                   icon={<MapPin size={18} />}
                   value={formData.location}
                   onChange={(e) => setFormData({...formData, location: e.target.value})}
+                  required
                 />
                 <Input 
                   label="Orçamento Estimado"
@@ -114,6 +176,7 @@ const CreateJobModal: React.FC<CreateJobModalProps> = ({ isOpen, onClose }) => {
                   icon={<DollarSign size={18} />}
                   value={formData.value}
                   onChange={(e) => setFormData({...formData, value: e.target.value})}
+                  required
                 />
                 <div className="space-y-2">
                     <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest ml-1">Descrição do Trabalho</label>
@@ -122,12 +185,13 @@ const CreateJobModal: React.FC<CreateJobModalProps> = ({ isOpen, onClose }) => {
                         placeholder="Descreva os detalhes do projeto, equipamentos necessários e prazos..."
                         value={formData.description}
                         onChange={(e) => setFormData({...formData, description: e.target.value})}
+                        required
                     />
                 </div>
               </div>
               <div className="flex gap-4">
-                <Button variant="ghost" onClick={() => setStep(1)} className="flex-1">Voltar</Button>
-                <Button type="submit" className="flex-2">Publicar Vaga</Button>
+                <Button variant="ghost" type="button" onClick={() => setStep(1)} className="flex-1">Voltar</Button>
+                <Button type="submit" disabled={loading} className="flex-2">{loading ? 'Publicando...' : 'Publicar Vaga'}</Button>
               </div>
             </form>
           )}
