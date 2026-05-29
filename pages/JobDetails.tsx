@@ -202,6 +202,21 @@ const JobDetails: React.FC = () => {
                     <p className="text-sm font-bold text-white">{job.value}</p>
                 </div>
             </div>
+            {job.date && (
+              <div className="flex items-center gap-3 col-span-2">
+                  <div className="p-2.5 bg-[#8A2BE2]/10 rounded-xl text-[#8A2BE2]">
+                      <Calendar size={18} />
+                  </div>
+                  <div>
+                      <p className="text-[10px] text-gray-500 font-bold uppercase tracking-wider">Data do Evento</p>
+                      <p className="text-sm font-bold text-white">
+                        {new Date(job.date + 'T00:00:00').toLocaleDateString('pt-BR', {
+                          weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'
+                        })}
+                      </p>
+                  </div>
+              </div>
+            )}
           </div>
 
           <div className="space-y-3">

@@ -2,10 +2,13 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   ArrowLeft, Save, Lock, Camera, 
-  Check, Instagram, Globe, MapPin, Phone, DollarSign, User, X 
+  Check, Instagram, Globe, MapPin, Phone, DollarSign, User, X, LogOut 
 } from 'lucide-react';
 import { CustomService } from '../types';
 import { MAIN_ROLES, SPECIALTIES } from '../constants';
+
+// Unified skill tags: professions + niches in one list
+const ALL_SKILLS = [...MAIN_ROLES, ...SPECIALTIES];
 import { supabase } from '../lib/supabase';
 
 const MyProfile: React.FC = () => {
@@ -31,7 +34,6 @@ const MyProfile: React.FC = () => {
   const [professionalData, setProfessionalData] = useState({
     bio: '',
     funcoes: [] as string[],
-    specialties: [] as string[],
     minPrice: 0,
     maxPrice: 0,
     currency: 'BRL',
@@ -73,10 +75,13 @@ const MyProfile: React.FC = () => {
         .single();
 
       if (freelaProfile) {
+        // Merge funcoes + specialties into unified list
+        const saved = freelaProfile.funcoes || [];
+        const legacySpecs = freelaProfile.specialties || [];
+        const merged = Array.from(new Set([...saved, ...legacySpecs]));
         setProfessionalData({
           bio: freelaProfile.bio || '',
-          funcoes: freelaProfile.funcoes || (profile.role ? [profile.role] : []),
-          specialties: freelaProfile.specialties || [],
+          funcoes: merged.length > 0 ? merged : (profile.role ? [profile.role] : []),
           minPrice: Number(freelaProfile.min_price || 0),
           maxPrice: Number(freelaProfile.max_price || 0),
           currency: freelaProfile.currency || 'BRL',
@@ -104,23 +109,15 @@ const MyProfile: React.FC = () => {
     setProfessionalData(prev => ({ ...prev, [name]: name.includes('Price') ? Number(value) : value }));
   };
 
-  const toggleSpecialty = (spec: string) => {
-    setProfessionalData(prev => {
-      const current = prev.specialties || [];
-      return current.includes(spec)
-        ? { ...prev, specialties: current.filter(s => s !== spec) }
-        : { ...prev, specialties: [...current, spec] };
-    });
-  };
-
-  const toggleRole = (role: string) => {
+  // Unified toggle for all skills (professions + specialties merged)
+  const toggleSkill = (skill: string) => {
     setProfessionalData(prev => {
       const current = prev.funcoes || [];
-      if (current.includes(role)) {
-        if (current.length === 1) return prev;
-        return { ...prev, funcoes: current.filter(r => r !== role) };
+      if (current.includes(skill)) {
+        if (current.length === 1) return prev; // always keep at least one
+        return { ...prev, funcoes: current.filter(s => s !== skill) };
       }
-      return { ...prev, funcoes: [...current, role] };
+      return { ...prev, funcoes: [...current, skill] };
     });
   };
 
@@ -133,6 +130,18 @@ const MyProfile: React.FC = () => {
       return { ...prev, funcoes: [...current, roleName] };
     });
     setCustomRoleInput('');
+  };
+
+  const handleLogoff = async () => {
+    const confirm = window.confirm('Deseja realmente sair da sua conta?');
+    if (!confirm) return;
+    try {
+      await supabase.auth.signOut();
+      navigate('/');
+    } catch (err: any) {
+      console.error('Erro ao fazer logoff:', err);
+      alert('Erro ao fazer logoff: ' + err.message);
+    }
   };
 
   const handleSave = async () => {
@@ -180,7 +189,7 @@ const MyProfile: React.FC = () => {
           id: currentUser.id,
           bio: professionalData.bio,
           funcoes: professionalData.funcoes,
-          specialties: professionalData.specialties,
+          specialties: [], // cleared — all skills unified in funcoes
           min_price: professionalData.minPrice,
           max_price: professionalData.maxPrice,
           currency: professionalData.currency,
@@ -346,43 +355,46 @@ const MyProfile: React.FC = () => {
             <h2 className="text-sm font-black text-white uppercase tracking-[0.15em]">Perfil Profissional</h2>
           </div>
 
-          {/* Roles */}
+          {/* Unified Skills & Specialties */}
           <div className="space-y-4">
-            <label className={labelClass}>Minhas Funções / Atividades</label>
-            
-            {/* Predefined Roles */}
+            <div>
+              <label className={labelClass}>Habilidades &amp; Especialidades</label>
+              <p className="text-[9px] text-gray-600 font-bold ml-1 mb-3">Selecione suas funções e nichos — tudo no mesmo lugar</p>
+            </div>
+
+            {/* All predefined skills (roles + niches unified) */}
             <div className="flex flex-wrap gap-2">
-              {MAIN_ROLES.map(role => {
-                const isSelected = (professionalData.funcoes || []).includes(role);
+              {ALL_SKILLS.map(skill => {
+                const isSelected = (professionalData.funcoes || []).includes(skill);
                 return (
                   <button
-                    key={role}
+                    key={skill}
                     type="button"
-                    onClick={() => toggleRole(role)}
+                    onClick={() => toggleSkill(skill)}
                     className={`text-xs px-3 py-2 rounded-xl border transition-all font-bold
                       ${isSelected
-                        ? 'bg-[#8A2BE2] border-[#8A2BE2] text-white shadow-[0_0_15px_rgba(138,43,226,0.3)]' 
+                        ? 'bg-[#8A2BE2] border-[#8A2BE2] text-white shadow-[0_0_15px_rgba(138,43,226,0.3)]'
                         : 'bg-white/5 border-white/10 text-gray-400 hover:border-[#8A2BE2]/40 hover:text-white'}`}
                   >
-                    {role}
+                    {skill}
                   </button>
                 );
               })}
             </div>
 
-            {/* Custom Roles List */}
-            {professionalData.funcoes.filter(role => !MAIN_ROLES.includes(role)).length > 0 && (
+            {/* Custom tags added by user */}
+            {professionalData.funcoes.filter(skill => !ALL_SKILLS.includes(skill)).length > 0 && (
               <div className="space-y-2 mt-2 pt-2 border-t border-white/5">
-                <span className="text-[9px] text-gray-500 font-bold uppercase tracking-widest block">Profissões Personalizadas Adicionadas:</span>
+                <span className="text-[9px] text-gray-500 font-bold uppercase tracking-widest block">Tags Personalizadas:</span>
                 <div className="flex flex-wrap gap-2">
-                  {professionalData.funcoes.filter(role => !MAIN_ROLES.includes(role)).map(role => (
+                  {professionalData.funcoes.filter(skill => !ALL_SKILLS.includes(skill)).map(skill => (
                     <button
-                      key={role}
+                      key={skill}
                       type="button"
-                      onClick={() => toggleRole(role)}
+                      onClick={() => toggleSkill(skill)}
                       className="text-xs px-3 py-2 rounded-xl border transition-all font-bold bg-[#8A2BE2] border-[#8A2BE2] text-white shadow-[0_0_15px_rgba(138,43,226,0.3)] flex items-center gap-1.5 animate-in zoom-in duration-200"
                     >
-                      {role}
+                      {skill}
                       <X size={12} className="opacity-60 hover:opacity-100" />
                     </button>
                   ))}
@@ -390,11 +402,11 @@ const MyProfile: React.FC = () => {
               </div>
             )}
 
-            {/* Add Custom Role Input */}
+            {/* Add any custom skill/niche */}
             <div className="flex gap-2 mt-2 pt-2 border-t border-white/5">
               <input
                 type="text"
-                placeholder="Ex: Designer de Produção, Dublador..."
+                placeholder="Ex: Dublador, Roteirista de Podcast, VJ..."
                 value={customRoleInput}
                 onChange={e => setCustomRoleInput(e.target.value)}
                 onKeyDown={e => {
@@ -410,7 +422,7 @@ const MyProfile: React.FC = () => {
                 onClick={handleAddCustomRole}
                 className="bg-[#8A2BE2] hover:bg-[#9D4EDD] text-white px-5 rounded-xl text-xs font-black uppercase tracking-wider transition-all hover:scale-105 active:scale-95 shadow-md"
               >
-                Adicionar
+                + Adicionar
               </button>
             </div>
           </div>
@@ -470,25 +482,7 @@ const MyProfile: React.FC = () => {
             </div>
           </div>
 
-          {/* Specialties */}
-          <div className="space-y-3">
-            <label className={labelClass}>Especialidades / Nichos</label>
-            <div className="flex flex-wrap gap-2">
-              {SPECIALTIES.map(spec => (
-                <button
-                  key={spec}
-                  type="button"
-                  onClick={() => toggleSpecialty(spec)}
-                  className={`text-xs px-3 py-2 rounded-xl border transition-all font-bold
-                    ${professionalData.specialties.includes(spec)
-                      ? 'bg-[#8A2BE2] border-[#8A2BE2] text-white shadow-[0_0_15px_rgba(138,43,226,0.3)]' 
-                      : 'bg-white/5 border-white/10 text-gray-400 hover:border-[#8A2BE2]/40 hover:text-white'}`}
-                >
-                  {spec}
-                </button>
-              ))}
-            </div>
-          </div>
+
 
           {/* Bio */}
           <div>
@@ -553,6 +547,14 @@ const MyProfile: React.FC = () => {
               : 'bg-[#8A2BE2] text-white hover:bg-[#9D4EDD] shadow-[0_10px_30px_rgba(138,43,226,0.3)]'}`}
         >
           {saved ? <><Check size={18} /> Perfil Salvo com Sucesso!</> : saveLoading ? 'Salvando...' : <><Save size={18} /> Salvar Alterações</>}
+        </button>
+
+        {/* Logoff Button */}
+        <button
+          onClick={handleLogoff}
+          className="w-full py-4 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 rounded-[24px] text-sm font-black uppercase tracking-widest transition-all shadow-md flex items-center justify-center gap-2 active:scale-[0.98] mt-6 duration-300"
+        >
+          <LogOut size={18} /> Sair da Conta (Logoff)
         </button>
       </div>
     </div>

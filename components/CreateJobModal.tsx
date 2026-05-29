@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, MapPin, DollarSign, Check, Sparkles } from 'lucide-react';
+import { X, MapPin, DollarSign, Check, Sparkles, Calendar } from 'lucide-react';
 import Button from './Button';
 import Input from './Input';
 import { supabase } from '../lib/supabase';
@@ -21,7 +21,8 @@ const CreateJobModal: React.FC<CreateJobModalProps> = ({ isOpen, onClose, jobToE
     role: '',
     location: '',
     value: '',
-    description: ''
+    description: '',
+    date: ''
   });
 
   useEffect(() => {
@@ -32,7 +33,8 @@ const CreateJobModal: React.FC<CreateJobModalProps> = ({ isOpen, onClose, jobToE
         role: jobToEdit.role || '',
         location: jobToEdit.location || '',
         value: jobToEdit.value || '',
-        description: jobToEdit.description || ''
+        description: jobToEdit.description || '',
+        date: jobToEdit.date || ''
       });
       setStep(1);
     } else if (isOpen) {
@@ -42,7 +44,8 @@ const CreateJobModal: React.FC<CreateJobModalProps> = ({ isOpen, onClose, jobToE
         role: '',
         location: '',
         value: '',
-        description: ''
+        description: '',
+        date: ''
       });
       setStep(1);
     }
@@ -91,7 +94,8 @@ const CreateJobModal: React.FC<CreateJobModalProps> = ({ isOpen, onClose, jobToE
             latitude: lat,
             longitude: lng,
             value: formData.value || 'R$ 1.000',
-            description: formData.description
+            description: formData.description,
+            date: formData.date || null
           })
           .eq('id', jobToEdit.id);
         saveError = error;
@@ -108,6 +112,7 @@ const CreateJobModal: React.FC<CreateJobModalProps> = ({ isOpen, onClose, jobToE
             longitude: lng,
             value: formData.value || 'R$ 1.000',
             description: formData.description,
+            date: formData.date || null,
             author_id: user.id,
             status: 'Open'
           });
@@ -126,7 +131,8 @@ const CreateJobModal: React.FC<CreateJobModalProps> = ({ isOpen, onClose, jobToE
           role: '',
           location: '',
           value: '',
-          description: ''
+          description: '',
+          date: ''
         });
       }, 2000);
     } catch (err: any) {
@@ -232,6 +238,34 @@ const CreateJobModal: React.FC<CreateJobModalProps> = ({ isOpen, onClose, jobToE
                   onChange={(e) => setFormData({...formData, value: e.target.value})}
                   required
                 />
+                {/* Event Date field — prominent with calendar icon */}
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest ml-1">Data do Evento</label>
+                  <div className="relative">
+                    <div className="absolute left-4 top-1/2 -translate-y-1/2 p-1.5 bg-[#8A2BE2]/20 rounded-lg">
+                      <Calendar size={14} className="text-[#8A2BE2]" />
+                    </div>
+                    <input
+                      type="date"
+                      className="w-full bg-[#222] border border-[#8A2BE2]/30 rounded-2xl p-4 pl-12 text-white text-sm focus:border-[#8A2BE2]/70 outline-none transition-all"
+                      value={formData.date}
+                      onChange={(e) => setFormData({...formData, date: e.target.value})}
+                    />
+                  </div>
+                  {formData.date && (() => {
+                    const eventDate = new Date(formData.date + 'T00:00:00');
+                    const today = new Date();
+                    const daysUntil = Math.ceil((eventDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+                    if (daysUntil <= 0) return null;
+                    return (
+                      <p className={`text-[10px] font-black ml-1 ${
+                        daysUntil <= 7 ? 'text-red-400' : daysUntil <= 30 ? 'text-yellow-400' : 'text-green-400'
+                      }`}>
+                        {daysUntil <= 7 ? '🔴' : daysUntil <= 30 ? '🟡' : '🟢'} Faltam {daysUntil} dias · {eventDate.toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' })}
+                      </p>
+                    );
+                  })()}
+                </div>
                 <div className="space-y-2">
                     <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest ml-1">Descrição do Trabalho</label>
                     <textarea 

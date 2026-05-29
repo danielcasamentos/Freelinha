@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
     Search, MapPin, Briefcase, Filter, Plus,
-    Sparkles, LayoutGrid, Users, ShieldCheck, Star, Navigation, X
+    Sparkles, LayoutGrid, Users, ShieldCheck, Star, Navigation, X, Calendar
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import BottomNav from '../components/BottomNav';
@@ -58,6 +58,12 @@ const Explore: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'vagas' | 'profissionais' | 'minhas'>('vagas');
+
+  // Advanced filter panel state
+  const [showFilterPanel, setShowFilterPanel] = useState(false);
+  const [filterCity, setFilterCity] = useState('');
+  const [filterDateFrom, setFilterDateFrom] = useState('');
+  const [filterDateTo, setFilterDateTo] = useState('');
 
   // Database States
   const [currentUser, setCurrentUser] = useState<any>(null);
@@ -160,17 +166,40 @@ const Explore: React.FC = () => {
 
   useEffect(() => { fetchData(); }, []);
 
-  // Attach distance to each job and sort
+  // Attach distance to each job, apply filters, and sort with smart logic
   const jobsWithDistance = useMemo(() => {
+    const hasDateFilter = !!(filterDateFrom || filterDateTo);
+    const hasCityFilter = !!filterCity.trim();
+
     return vacancies
       .filter(job => {
+        // Text search
         const q = searchTerm.toLowerCase();
-        return !q || (
+        const matchesText = !q || (
           job.title?.toLowerCase().includes(q) ||
           job.role?.toLowerCase().includes(q) ||
           job.description?.toLowerCase().includes(q) ||
           job.location?.toLowerCase().includes(q)
         );
+
+        // City filter
+        const matchesCity = !hasCityFilter || (
+          job.location?.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+            .includes(filterCity.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, ''))
+        );
+
+        // Date filter — only apply if job has a date
+        let matchesDate = true;
+        if (hasDateFilter && job.date) {
+          const d = new Date(job.date);
+          if (filterDateFrom) matchesDate = matchesDate && d >= new Date(filterDateFrom);
+          if (filterDateTo)   matchesDate = matchesDate && d <= new Date(filterDateTo);
+        } else if (hasDateFilter && !job.date) {
+          // If user is filtering by date, hide jobs without a date
+          matchesDate = false;
+        }
+
+        return matchesText && matchesCity && matchesDate;
       })
       .map(job => {
         const sameCity = isSameCity(currentUser?.city, currentUser?.state, job.location);
@@ -180,18 +209,30 @@ const Explore: React.FC = () => {
         if (sameCity && (dist === null || dist > 150)) {
           dist = 0.1;
         }
-        return {
-          ...job,
-          distance: dist
-        };
+        return { ...job, distance: dist };
       })
       .sort((a, b) => {
+        // Smart sorting:
+        // City filter active → sort by date ascending (soonest first)
+        if (hasCityFilter && !hasDateFilter) {
+          const da = a.date ? new Date(a.date).getTime() : Infinity;
+          const db = b.date ? new Date(b.date).getTime() : Infinity;
+          return da - db;
+        }
+        // Date filter active → sort by distance
+        if (hasDateFilter && !hasCityFilter) {
+          if (a.distance === null && b.distance === null) return 0;
+          if (a.distance === null) return 1;
+          if (b.distance === null) return -1;
+          return a.distance - b.distance;
+        }
+        // Default: distance-based sort
         if (a.distance === null && b.distance === null) return 0;
         if (a.distance === null) return 1;
         if (b.distance === null) return -1;
         return a.distance - b.distance;
       });
-  }, [vacancies, searchTerm, userLocation, currentUser]);
+  }, [vacancies, searchTerm, userLocation, currentUser, filterCity, filterDateFrom, filterDateTo]);
 
   // Attach distance to freelancers and sort
   const freelancersWithDistance = useMemo(() => {
@@ -298,7 +339,7 @@ const Explore: React.FC = () => {
 
       <main className="px-6 py-8 space-y-8 max-w-2xl mx-auto animate-in fade-in duration-500">
 
-        {/* Search + Location Bar */}
+        {/* Search + Location + Filters Bar */}
         {activeTab !== 'minhas' && (
           <div className="space-y-3">
             <div className="flex gap-3">
@@ -311,10 +352,78 @@ const Explore: React.FC = () => {
                   className="bg-white/5 border-white/10"
                 />
               </div>
-              <button className="bg-white/5 border border-white/10 text-gray-400 p-3 rounded-xl hover:text-white transition-all">
+              <button
+                onClick={() => setShowFilterPanel(prev => !prev)}
+                className={`border p-3 rounded-xl hover:text-white transition-all ${
+                  showFilterPanel || filterCity || filterDateFrom || filterDateTo
+                    ? 'bg-[#8A2BE2]/20 border-[#8A2BE2]/40 text-[#8A2BE2]'
+                    : 'bg-white/5 border-white/10 text-gray-400'
+                }`}
+                title="Filtros avançados"
+              >
                 <Filter size={20} />
               </button>
             </div>
+
+            {/* Advanced Filter Panel */}
+            {showFilterPanel && (
+              <div className="bg-white/5 border border-[#8A2BE2]/20 rounded-[24px] p-5 space-y-4 animate-in slide-in-from-top duration-300">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-black text-[#8A2BE2] uppercase tracking-widest">Filtros Avançados</span>
+                  {(filterCity || filterDateFrom || filterDateTo) && (
+                    <button
+                      onClick={() => { setFilterCity(''); setFilterDateFrom(''); setFilterDateTo(''); }}
+                      className="text-[9px] font-black text-red-400 uppercase tracking-wider hover:text-red-300 transition-all"
+                    >
+                      Limpar Filtros
+                    </button>
+                  )}
+                </div>
+
+                {/* City filter */}
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Cidade</label>
+                  <input
+                    type="text"
+                    placeholder="Ex: São Paulo, Rio de Janeiro..."
+                    value={filterCity}
+                    onChange={e => setFilterCity(e.target.value)}
+                    className="w-full bg-white/5 border border-white/10 text-white text-xs rounded-xl px-4 py-2.5 placeholder-gray-600 focus:outline-none focus:border-[#8A2BE2]/50 transition-all"
+                  />
+                </div>
+
+                {/* Date range */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Data a partir de</label>
+                    <input
+                      type="date"
+                      value={filterDateFrom}
+                      onChange={e => setFilterDateFrom(e.target.value)}
+                      className="w-full bg-white/5 border border-white/10 text-white text-xs rounded-xl px-4 py-2.5 focus:outline-none focus:border-[#8A2BE2]/50 transition-all"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Até</label>
+                    <input
+                      type="date"
+                      value={filterDateTo}
+                      onChange={e => setFilterDateTo(e.target.value)}
+                      className="w-full bg-white/5 border border-white/10 text-white text-xs rounded-xl px-4 py-2.5 focus:outline-none focus:border-[#8A2BE2]/50 transition-all"
+                    />
+                  </div>
+                </div>
+
+                {/* Smart sort hint */}
+                <p className="text-[9px] text-gray-600 font-bold">
+                  {filterCity && !filterDateFrom && !filterDateTo
+                    ? '📅 Ordenação por data do evento (mais próximos primeiro)'
+                    : (filterDateFrom || filterDateTo) && !filterCity
+                    ? '📍 Ordenação por distância da sua localização'
+                    : '📍 Ordenação padrão por distância'}
+                </p>
+              </div>
+            )}
 
             {/* Location Panel */}
             <div className="bg-white/5 border border-white/5 rounded-[24px] p-4 space-y-3">
@@ -398,6 +507,24 @@ const Explore: React.FC = () => {
                               📍 {formatDistance(job.distance, isSameCity(currentUser?.city, currentUser?.state, job.location))}
                             </span>
                           )}
+                          {/* Date Badge */}
+                          {job.date && (() => {
+                            const eventDate = new Date(job.date + 'T00:00:00');
+                            const today = new Date();
+                            const daysUntil = Math.ceil((eventDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+                            if (daysUntil < 0) return null;
+                            const color = daysUntil <= 7
+                              ? 'bg-red-500/20 text-red-400 border-red-500/30'
+                              : daysUntil <= 30
+                              ? 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30'
+                              : 'bg-blue-500/20 text-blue-400 border-blue-500/30';
+                            return (
+                              <span className={`text-[10px] font-black px-2.5 py-1 rounded-full border flex items-center gap-1 ${color}`}>
+                                <Calendar size={9} />
+                                {daysUntil === 0 ? 'Hoje!' : daysUntil === 1 ? 'Amanhã!' : `${daysUntil}d`}
+                              </span>
+                            );
+                          })()}
                         </div>
                         <h3 className="text-xl font-black text-white group-hover:text-[#8A2BE2] transition-colors tracking-tight truncate">
                           {job.title}
@@ -410,6 +537,11 @@ const Explore: React.FC = () => {
                       <div className="text-right flex-shrink-0">
                         <div className="text-sm font-black text-white">{job.value}</div>
                         <div className="text-[10px] text-gray-500 font-bold uppercase mt-1 tracking-widest">{job.location}</div>
+                        {job.date && (
+                          <div className="text-[9px] text-gray-600 font-bold mt-1">
+                            {new Date(job.date + 'T00:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}
+                          </div>
+                        )}
                       </div>
                     </div>
 
