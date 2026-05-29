@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   ArrowLeft, Save, Lock, Camera, 
-  Check, Instagram, Globe, MapPin, Phone, DollarSign, User 
+  Check, Instagram, Globe, MapPin, Phone, DollarSign, User, X 
 } from 'lucide-react';
 import { CustomService } from '../types';
 import { MAIN_ROLES, SPECIALTIES } from '../constants';
@@ -14,6 +14,7 @@ const MyProfile: React.FC = () => {
   const [saveLoading, setSaveLoading] = useState(false);
   const [saved, setSaved] = useState(false);
   const [currentUser, setCurrentUser] = useState<any>(null);
+  const [customRoleInput, setCustomRoleInput] = useState('');
 
   // Form states
   const [personalData, setPersonalData] = useState({
@@ -121,6 +122,17 @@ const MyProfile: React.FC = () => {
       }
       return { ...prev, funcoes: [...current, role] };
     });
+  };
+
+  const handleAddCustomRole = () => {
+    const roleName = customRoleInput.trim();
+    if (!roleName) return;
+    setProfessionalData(prev => {
+      const current = prev.funcoes || [];
+      if (current.includes(roleName)) return prev;
+      return { ...prev, funcoes: [...current, roleName] };
+    });
+    setCustomRoleInput('');
   };
 
   const handleSave = async () => {
@@ -335,8 +347,10 @@ const MyProfile: React.FC = () => {
           </div>
 
           {/* Roles */}
-          <div className="space-y-3">
+          <div className="space-y-4">
             <label className={labelClass}>Minhas Funções / Atividades</label>
+            
+            {/* Predefined Roles */}
             <div className="flex flex-wrap gap-2">
               {MAIN_ROLES.map(role => {
                 const isSelected = (professionalData.funcoes || []).includes(role);
@@ -354,6 +368,50 @@ const MyProfile: React.FC = () => {
                   </button>
                 );
               })}
+            </div>
+
+            {/* Custom Roles List */}
+            {professionalData.funcoes.filter(role => !MAIN_ROLES.includes(role)).length > 0 && (
+              <div className="space-y-2 mt-2 pt-2 border-t border-white/5">
+                <span className="text-[9px] text-gray-500 font-bold uppercase tracking-widest block">Profissões Personalizadas Adicionadas:</span>
+                <div className="flex flex-wrap gap-2">
+                  {professionalData.funcoes.filter(role => !MAIN_ROLES.includes(role)).map(role => (
+                    <button
+                      key={role}
+                      type="button"
+                      onClick={() => toggleRole(role)}
+                      className="text-xs px-3 py-2 rounded-xl border transition-all font-bold bg-[#8A2BE2] border-[#8A2BE2] text-white shadow-[0_0_15px_rgba(138,43,226,0.3)] flex items-center gap-1.5 animate-in zoom-in duration-200"
+                    >
+                      {role}
+                      <X size={12} className="opacity-60 hover:opacity-100" />
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Add Custom Role Input */}
+            <div className="flex gap-2 mt-2 pt-2 border-t border-white/5">
+              <input
+                type="text"
+                placeholder="Ex: Designer de Produção, Dublador..."
+                value={customRoleInput}
+                onChange={e => setCustomRoleInput(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleAddCustomRole();
+                  }
+                }}
+                className={`${inputClass} !py-2.5 flex-1`}
+              />
+              <button
+                type="button"
+                onClick={handleAddCustomRole}
+                className="bg-[#8A2BE2] hover:bg-[#9D4EDD] text-white px-5 rounded-xl text-xs font-black uppercase tracking-wider transition-all hover:scale-105 active:scale-95 shadow-md"
+              >
+                Adicionar
+              </button>
             </div>
           </div>
 

@@ -23,7 +23,25 @@ function getDistance(lat1: number, lon1: number, lat2: number, lon2: number): nu
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-function formatDistance(km: number): string {
+function isSameCity(userCity: string | undefined | null, userState: string | undefined | null, jobLocationStr: string | undefined | null): boolean {
+  if (!userCity || !jobLocationStr) return false;
+  const uCity = userCity.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  
+  const jobParts = jobLocationStr.split(',').map(p => p.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, ""));
+  const jCity = jobParts[0] || "";
+  
+  return uCity === jCity || uCity.includes(jCity) || jCity.includes(uCity);
+}
+
+function isFreelancerSameCity(userCity: string | undefined | null, userState: string | undefined | null, otherCity: string | undefined | null, otherState: string | undefined | null): boolean {
+  if (!userCity || !otherCity) return false;
+  const uCity = userCity.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  const oCity = otherCity.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  return uCity === oCity || uCity.includes(oCity) || oCity.includes(uCity);
+}
+
+function formatDistance(km: number, isSameCityFlag?: boolean): string {
+  if (isSameCityFlag) return 'Na sua cidade';
   if (km < 1) return `${Math.round(km * 1000)}m`;
   if (km < 10) return `${km.toFixed(1)}km`;
   return `${Math.round(km)}km`;
@@ -154,19 +172,26 @@ const Explore: React.FC = () => {
           job.location?.toLowerCase().includes(q)
         );
       })
-      .map(job => ({
-        ...job,
-        distance: (userLocation && job.latitude && job.longitude)
+      .map(job => {
+        const sameCity = isSameCity(currentUser?.city, currentUser?.state, job.location);
+        let dist = (userLocation && job.latitude && job.longitude)
           ? getDistance(userLocation.lat, userLocation.lng, job.latitude, job.longitude)
-          : null
-      }))
+          : null;
+        if (sameCity && (dist === null || dist > 150)) {
+          dist = 0.1;
+        }
+        return {
+          ...job,
+          distance: dist
+        };
+      })
       .sort((a, b) => {
         if (a.distance === null && b.distance === null) return 0;
         if (a.distance === null) return 1;
         if (b.distance === null) return -1;
         return a.distance - b.distance;
       });
-  }, [vacancies, searchTerm, userLocation]);
+  }, [vacancies, searchTerm, userLocation, currentUser]);
 
   // Attach distance to freelancers and sort
   const freelancersWithDistance = useMemo(() => {
@@ -178,12 +203,19 @@ const Explore: React.FC = () => {
         return !q || name.toLowerCase().includes(q) ||
           (f.funcoes && f.funcoes.some((r: string) => r.toLowerCase().includes(q)));
       })
-      .map(f => ({
-        ...f,
-        distance: (userLocation && f.latitude && f.longitude)
+      .map(f => {
+        const sameCity = isFreelancerSameCity(currentUser?.city, currentUser?.state, f.profile?.city, f.profile?.state);
+        let dist = (userLocation && f.latitude && f.longitude)
           ? getDistance(userLocation.lat, userLocation.lng, f.latitude, f.longitude)
-          : null
-      }))
+          : null;
+        if (sameCity && (dist === null || dist > 150)) {
+          dist = 0.1;
+        }
+        return {
+          ...f,
+          distance: dist
+        };
+      })
       .sort((a, b) => {
         if (a.distance === null && b.distance === null) return 0;
         if (a.distance === null) return 1;
@@ -363,7 +395,7 @@ const Explore: React.FC = () => {
                           {/* Distance Badge */}
                           {job.distance !== null && (
                             <span className={`text-[10px] font-black uppercase tracking-wider px-2.5 py-1 rounded-full border ${distanceBadgeColor(job.distance)}`}>
-                              📍 {formatDistance(job.distance)}
+                              📍 {formatDistance(job.distance, isSameCity(currentUser?.city, currentUser?.state, job.location))}
                             </span>
                           )}
                         </div>
@@ -431,9 +463,13 @@ const Explore: React.FC = () => {
                 <div className="flex gap-4 overflow-x-auto pb-4 scrollbar-hide">
                   {eliteFreelancers.map(f => {
                     const name = `${f.profile?.first_name || ''} ${f.profile?.last_name || ''}`;
-                    const dist = (userLocation && f.latitude && f.longitude)
+                    const sameCity = isFreelancerSameCity(currentUser?.city, currentUser?.state, f.profile?.city, f.profile?.state);
+                    let dist = (userLocation && f.latitude && f.longitude)
                       ? getDistance(userLocation.lat, userLocation.lng, f.latitude, f.longitude)
                       : null;
+                    if (sameCity && (dist === null || dist > 150)) {
+                      dist = 0.1;
+                    }
                     return (
                       <div
                         key={f.id}
@@ -451,7 +487,7 @@ const Explore: React.FC = () => {
                           <p className="text-[9px] text-[#8A2BE2] font-bold uppercase mt-0.5">{f.funcoes?.[0] || 'Profissional'}</p>
                           {dist !== null && (
                             <p className={`text-[9px] font-black mt-1 px-2 py-0.5 rounded-full border ${distanceBadgeColor(dist)}`}>
-                              {formatDistance(dist)}
+                              {formatDistance(dist, sameCity)}
                             </p>
                           )}
                         </div>
@@ -461,7 +497,7 @@ const Explore: React.FC = () => {
                 </div>
               </section>
             )}
-
+ 
             <div className="space-y-6">
               <div className="flex items-center justify-between px-2">
                 <h2 className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em]">
@@ -474,7 +510,7 @@ const Explore: React.FC = () => {
                   <div key={f.id} className="relative">
                     {f.distance !== null && (
                       <span className={`absolute top-4 right-4 z-10 text-[10px] font-black px-2.5 py-1 rounded-full border ${distanceBadgeColor(f.distance)}`}>
-                        📍 {formatDistance(f.distance)}
+                        📍 {formatDistance(f.distance, isFreelancerSameCity(currentUser?.city, currentUser?.state, f.profile?.city, f.profile?.state))}
                       </span>
                     )}
                     <FreelancerCard

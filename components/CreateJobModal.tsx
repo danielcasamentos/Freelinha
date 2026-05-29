@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { X, MapPin, DollarSign, FileText, Camera, Check } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { X, MapPin, DollarSign, Check, Sparkles } from 'lucide-react';
 import Button from './Button';
 import Input from './Input';
 import { supabase } from '../lib/supabase';
@@ -8,9 +8,10 @@ import { MAIN_ROLES } from '../constants';
 interface CreateJobModalProps {
   isOpen: boolean;
   onClose: () => void;
+  jobToEdit?: any; // Optional job structure to edit
 }
 
-const CreateJobModal: React.FC<CreateJobModalProps> = ({ isOpen, onClose }) => {
+const CreateJobModal: React.FC<CreateJobModalProps> = ({ isOpen, onClose, jobToEdit }) => {
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -23,6 +24,30 @@ const CreateJobModal: React.FC<CreateJobModalProps> = ({ isOpen, onClose }) => {
     description: ''
   });
 
+  useEffect(() => {
+    if (jobToEdit && isOpen) {
+      setFormData({
+        title: jobToEdit.title || '',
+        type: jobToEdit.type || '',
+        role: jobToEdit.role || '',
+        location: jobToEdit.location || '',
+        value: jobToEdit.value || '',
+        description: jobToEdit.description || ''
+      });
+      setStep(1);
+    } else if (isOpen) {
+      setFormData({
+        title: '',
+        type: '',
+        role: '',
+        location: '',
+        value: '',
+        description: ''
+      });
+      setStep(1);
+    }
+  }, [jobToEdit, isOpen]);
+
   if (!isOpen) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -33,7 +58,7 @@ const CreateJobModal: React.FC<CreateJobModalProps> = ({ isOpen, onClose }) => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
-        throw new Error('Você precisa estar logado para publicar uma vaga.');
+        throw new Error('Você precisa estar logado para publicar/editar uma vaga.');
       }
 
       // Geocode the job location via Nominatim
@@ -50,25 +75,46 @@ const CreateJobModal: React.FC<CreateJobModalProps> = ({ isOpen, onClose }) => {
           lng = parseFloat(results[0].lon);
         }
       } catch (geocodeErr) {
-        console.error('Erro de geocodificação ao criar vaga:', geocodeErr);
+        console.error('Erro de geocodificação ao criar/editar vaga:', geocodeErr);
       }
 
-      const { error: insertError } = await supabase
-        .from('jobs')
-        .insert({
-          title: formData.title,
-          type: formData.type || 'Casamento',
-          role: formData.role || 'Videomaker',
-          location: formData.location || 'São Paulo, SP',
-          latitude: lat,
-          longitude: lng,
-          value: formData.value || 'R$ 1.000',
-          description: formData.description,
-          author_id: user.id,
-          status: 'Open'
-        });
+      let saveError;
+      if (jobToEdit) {
+        // Edit flow
+        const { error } = await supabase
+          .from('jobs')
+          .update({
+            title: formData.title,
+            type: formData.type || 'Casamento',
+            role: formData.role || 'Videomaker',
+            location: formData.location || 'São Paulo, SP',
+            latitude: lat,
+            longitude: lng,
+            value: formData.value || 'R$ 1.000',
+            description: formData.description
+          })
+          .eq('id', jobToEdit.id);
+        saveError = error;
+      } else {
+        // Create flow
+        const { error } = await supabase
+          .from('jobs')
+          .insert({
+            title: formData.title,
+            type: formData.type || 'Casamento',
+            role: formData.role || 'Videomaker',
+            location: formData.location || 'São Paulo, SP',
+            latitude: lat,
+            longitude: lng,
+            value: formData.value || 'R$ 1.000',
+            description: formData.description,
+            author_id: user.id,
+            status: 'Open'
+          });
+        saveError = error;
+      }
 
-      if (insertError) throw insertError;
+      if (saveError) throw saveError;
 
       setStep(3);
       setTimeout(() => {
@@ -85,7 +131,7 @@ const CreateJobModal: React.FC<CreateJobModalProps> = ({ isOpen, onClose }) => {
       }, 2000);
     } catch (err: any) {
       console.error(err);
-      setError(err.message || 'Erro ao publicar a vaga.');
+      setError(err.message || 'Erro ao salvar a vaga.');
     } finally {
       setLoading(false);
     }
@@ -106,7 +152,7 @@ const CreateJobModal: React.FC<CreateJobModalProps> = ({ isOpen, onClose }) => {
         <div className="p-8">
           <div className="flex justify-between items-center mb-8">
             <div>
-              <h2 className="text-2xl font-black text-white">Postar <span className="text-[#8A2BE2]">Vaga</span></h2>
+              <h2 className="text-2xl font-black text-white">{jobToEdit ? 'Editar' : 'Postar'} <span className="text-[#8A2BE2]">Vaga</span></h2>
               <p className="text-xs text-gray-500 font-bold uppercase tracking-widest mt-1">Passo {step} de 3</p>
             </div>
             <button onClick={onClose} className="p-2 hover:bg-white/5 rounded-full text-gray-500 hover:text-white transition-all">
@@ -134,7 +180,7 @@ const CreateJobModal: React.FC<CreateJobModalProps> = ({ isOpen, onClose }) => {
                     <div className="space-y-2">
                         <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest ml-1">Tipo</label>
                         <select 
-                            className="w-full bg-white/5 border border-white/10 rounded-2xl p-4 text-white text-sm focus:border-[#8A2BE2]/50 outline-none transition-all appearance-none"
+                            className="w-full bg-[#222] border border-white/10 rounded-2xl p-4 text-white text-sm focus:border-[#8A2BE2]/50 outline-none transition-all appearance-none"
                             value={formData.type}
                             onChange={(e) => setFormData({...formData, type: e.target.value})}
                         >
@@ -146,17 +192,20 @@ const CreateJobModal: React.FC<CreateJobModalProps> = ({ isOpen, onClose }) => {
                         </select>
                     </div>
                     <div className="space-y-2">
-                        <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest ml-1">Profissional</label>
-                        <select 
-                            className="w-full bg-white/5 border border-white/10 rounded-2xl p-4 text-white text-sm focus:border-[#8A2BE2]/50 outline-none transition-all appearance-none"
+                        <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest ml-1">Profissional Desejado</label>
+                        <input 
+                            list="job-roles-list"
+                            className="w-full bg-[#222] border border-white/10 rounded-2xl p-4 text-white text-sm focus:border-[#8A2BE2]/50 outline-none transition-all placeholder-gray-600"
+                            placeholder="Selecione ou digite..."
                             value={formData.role}
                             onChange={(e) => setFormData({...formData, role: e.target.value})}
-                        >
-                            <option value="">Selecione...</option>
-                            {MAIN_ROLES.map(role => (
-                              <option key={role} value={role}>{role}</option>
-                            ))}
-                        </select>
+                            required
+                        />
+                        <datalist id="job-roles-list">
+                          {MAIN_ROLES.map(role => (
+                            <option key={role} value={role} />
+                          ))}
+                        </datalist>
                     </div>
                 </div>
               </div>
@@ -196,7 +245,7 @@ const CreateJobModal: React.FC<CreateJobModalProps> = ({ isOpen, onClose }) => {
               </div>
               <div className="flex gap-4">
                 <Button variant="ghost" type="button" onClick={() => setStep(1)} className="flex-1">Voltar</Button>
-                <Button type="submit" disabled={loading} className="flex-2">{loading ? 'Publicando...' : 'Publicar Vaga'}</Button>
+                <Button type="submit" disabled={loading} className="flex-2">{loading ? 'Salvando...' : (jobToEdit ? 'Salvar Alterações' : 'Publicar Vaga')}</Button>
               </div>
             </form>
           )}
@@ -207,8 +256,10 @@ const CreateJobModal: React.FC<CreateJobModalProps> = ({ isOpen, onClose }) => {
                 <Check size={40} className="text-white" />
               </div>
               <div>
-                <h3 className="text-2xl font-black text-white">Vaga Publicada!</h3>
-                <p className="text-gray-500 text-sm mt-2">Em breve profissionais qualificados entrarão em contato.</p>
+                <h3 className="text-2xl font-black text-white">{jobToEdit ? 'Vaga Atualizada!' : 'Vaga Publicada!'}</h3>
+                <p className="text-gray-500 text-sm mt-2">
+                  {jobToEdit ? 'Suas alterações foram salvas com sucesso.' : 'Em breve profissionais qualificados entrarão em contato.'}
+                </p>
               </div>
             </div>
           )}

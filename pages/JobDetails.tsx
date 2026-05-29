@@ -7,6 +7,7 @@ import {
 import { supabase } from '../lib/supabase';
 import Button from '../components/Button';
 import BottomNav from '../components/BottomNav';
+import CreateJobModal from '../components/CreateJobModal';
 
 const JobDetails: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -17,6 +18,7 @@ const JobDetails: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
 
   const fetchJobAndMatches = async () => {
     try {
@@ -151,11 +153,21 @@ const JobDetails: React.FC = () => {
 
   return (
     <div className="min-h-[100dvh] bg-[#121212] pb-32">
-      <header className="sticky top-0 z-30 bg-[#121212]/80 backdrop-blur-xl border-b border-white/5 px-6 py-6 flex items-center gap-4">
-        <button onClick={() => navigate(-1)} className="p-2 hover:bg-white/5 rounded-full text-white transition-all">
-          <ArrowLeft size={24} />
-        </button>
-        <h1 className="text-xl font-bold text-white">Detalhes da <span className="text-[#8A2BE2]">Vaga</span></h1>
+      <header className="sticky top-0 z-30 bg-[#121212]/80 backdrop-blur-xl border-b border-white/5 px-6 py-6 flex items-center justify-between">
+        <div className="flex items-center gap-4">
+          <button onClick={() => navigate(-1)} className="p-2 hover:bg-white/5 rounded-full text-white transition-all">
+            <ArrowLeft size={24} />
+          </button>
+          <h1 className="text-xl font-bold text-white">Detalhes da <span className="text-[#8A2BE2]">Vaga</span></h1>
+        </div>
+        {isAuthor && (
+          <button 
+            onClick={() => setIsEditModalOpen(true)}
+            className="text-xs font-black uppercase tracking-widest bg-[#8A2BE2] hover:bg-[#9D4EDD] text-white px-4 py-2.5 rounded-xl transition-all shadow-[0_4px_12px_rgba(138,43,226,0.3)] active:scale-95 animate-in fade-in duration-300"
+          >
+            Editar Vaga
+          </button>
+        )}
       </header>
 
       <main className="px-6 py-8 space-y-10 max-w-2xl mx-auto">
@@ -329,6 +341,15 @@ const JobDetails: React.FC = () => {
           </section>
         )}
       </main>
+
+      <CreateJobModal 
+        isOpen={isEditModalOpen} 
+        onClose={() => { 
+          setIsEditModalOpen(false); 
+          fetchJobAndMatches(); 
+        }} 
+        jobToEdit={job} 
+      />
 
       <BottomNav />
     </div>

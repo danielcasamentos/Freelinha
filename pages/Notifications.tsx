@@ -18,7 +18,18 @@ function getDistance(lat1: number, lon1: number, lat2: number, lon2: number): nu
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-function formatDistance(km: number): string {
+function isSameCity(userCity: string | undefined | null, userState: string | undefined | null, jobLocationStr: string | undefined | null): boolean {
+  if (!userCity || !jobLocationStr) return false;
+  const uCity = userCity.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  
+  const jobParts = jobLocationStr.split(',').map(p => p.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, ""));
+  const jCity = jobParts[0] || "";
+  
+  return uCity === jCity || uCity.includes(jCity) || jCity.includes(uCity);
+}
+
+function formatDistance(km: number, isSameCityFlag?: boolean): string {
+  if (isSameCityFlag) return 'Na sua cidade';
   if (km < 1) return `${Math.round(km * 1000)}m`;
   if (km < 10) return `${km.toFixed(1)}km`;
   return `${Math.round(km)}km`;
@@ -125,13 +136,20 @@ const Notifications: React.FC = () => {
         setMyMatches(existingMatches || []);
 
         const matched = (allJobs || []).filter((j: any) => funcoes.includes(j.role));
-        const withDist = matched.map((j: any) => ({
-          ...j,
-          alreadyApplied: appliedIds.has(j.id),
-          distance: (freelaProfile?.latitude && freelaProfile?.longitude && j.latitude && j.longitude)
+        const withDist = matched.map((j: any) => {
+          const sameCity = isSameCity(profile?.city, profile?.state, j.location);
+          let dist = (freelaProfile?.latitude && freelaProfile?.longitude && j.latitude && j.longitude)
             ? getDistance(freelaProfile.latitude, freelaProfile.longitude, j.latitude, j.longitude)
-            : null,
-        })).sort((a: any, b: any) => {
+            : null;
+          if (sameCity && (dist === null || dist > 150)) {
+            dist = 0.1;
+          }
+          return {
+            ...j,
+            alreadyApplied: appliedIds.has(j.id),
+            distance: dist,
+          };
+        }).sort((a: any, b: any) => {
           if (a.distance === null && b.distance === null) return 0;
           if (a.distance === null) return 1;
           if (b.distance === null) return -1;
@@ -396,7 +414,7 @@ const Notifications: React.FC = () => {
                           <span className="text-[10px] font-black text-[#8A2BE2] uppercase tracking-[0.2em]">{job.type}</span>
                           {job.distance !== null && (
                             <span className={`text-[10px] font-black px-2 py-0.5 rounded-full border ${distanceBadgeColor(job.distance)}`}>
-                              📍 {formatDistance(job.distance)}
+                              📍 {formatDistance(job.distance, isSameCity(myProfile?.city, myProfile?.state, job.location))}
                             </span>
                           )}
                         </div>
