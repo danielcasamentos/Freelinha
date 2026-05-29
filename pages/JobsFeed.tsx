@@ -53,6 +53,8 @@ function distanceBadgeColor(km: number): string {
   return 'bg-gray-700/50 text-gray-400 border-gray-600/30';
 }
 
+import { useApp } from '../lib/AppContext';
+
 const Explore: React.FC = () => {
   const navigate = useNavigate();
   const [searchTerm, setSearchTerm] = useState('');
@@ -65,12 +67,15 @@ const Explore: React.FC = () => {
   const [filterDateFrom, setFilterDateFrom] = useState('');
   const [filterDateTo, setFilterDateTo] = useState('');
 
-  // Database States
-  const [currentUser, setCurrentUser] = useState<any>(null);
-  const [vacancies, setVacancies] = useState<any[]>([]);
-  const [freelancers, setFreelancers] = useState<any[]>([]);
-  const [myMatches, setMyMatches] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  // Global cached states from AppContext
+  const { 
+    currentUser, 
+    vacancies, 
+    freelancers, 
+    myMatches, 
+    loading, 
+    refetchAll 
+  } = useApp();
 
   // Location State
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number; label?: string } | null>(null);
@@ -79,6 +84,10 @@ const Explore: React.FC = () => {
   const [citySearching, setCitySearching] = useState(false);
   const [cityError, setCityError] = useState<string | null>(null);
   const citySearchRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Separate state for author's full job history (including archived/expired)
+  const [myAllJobs, setMyAllJobs] = useState<any[]>([]);
+  const [myAllJobsLoading, setMyAllJobsLoading] = useState(false);
 
   // Auto-request GPS on mount
   useEffect(() => {
@@ -102,6 +111,21 @@ const Explore: React.FC = () => {
       setLocationStatus('error');
     }
   }, []);
+
+  // Fetch ALL jobs for the author (including archived) when on the Postadas tab
+  useEffect(() => {
+    if (activeTab !== 'minhas' || !currentUser) return;
+    setMyAllJobsLoading(true);
+    supabase
+      .from('jobs')
+      .select('*')
+      .eq('author_id', currentUser.id)
+      .order('created_at', { ascending: false })
+      .then(({ data }) => {
+        if (data) setMyAllJobs(data);
+      })
+      .finally(() => setMyAllJobsLoading(false));
+  }, [activeTab, currentUser]);
 
   // Geocode city name via Nominatim (free, no API key)
   const handleCitySearch = async (cityName: string) => {
@@ -140,32 +164,6 @@ const Explore: React.FC = () => {
     setCityError(null);
   };
 
-  const fetchData = async () => {
-    try {
-      setLoading(true);
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) { navigate('/'); return; }
-
-      const { data: profile } = await supabase.from('profiles').select('*').eq('id', user.id).single();
-      setCurrentUser(profile);
-
-      const { data: jobs } = await supabase.from('jobs').select('*, author:profiles(*)');
-      setVacancies(jobs || []);
-
-      const { data: freelas } = await supabase.from('freelancer_profiles').select('*, profile:profiles(*)');
-      setFreelancers(freelas || []);
-
-      const { data: matches } = await supabase.from('matches').select('*').eq('freelancer_id', user.id);
-      setMyMatches(matches || []);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => { fetchData(); }, []);
-
   // Attach distance to each job, apply filters, and sort with smart logic
   const jobsWithDistance = useMemo(() => {
     const hasDateFilter = !!(filterDateFrom || filterDateTo);
@@ -178,6 +176,7 @@ const Explore: React.FC = () => {
         const matchesText = !q || (
           job.title?.toLowerCase().includes(q) ||
           job.role?.toLowerCase().includes(q) ||
+          job.type?.toLowerCase().includes(q) ||
           job.description?.toLowerCase().includes(q) ||
           job.location?.toLowerCase().includes(q)
         );
@@ -195,7 +194,6 @@ const Explore: React.FC = () => {
           if (filterDateFrom) matchesDate = matchesDate && d >= new Date(filterDateFrom);
           if (filterDateTo)   matchesDate = matchesDate && d <= new Date(filterDateTo);
         } else if (hasDateFilter && !job.date) {
-          // If user is filtering by date, hide jobs without a date
           matchesDate = false;
         }
 
@@ -212,21 +210,17 @@ const Explore: React.FC = () => {
         return { ...job, distance: dist };
       })
       .sort((a, b) => {
-        // Smart sorting:
-        // City filter active → sort by date ascending (soonest first)
         if (hasCityFilter && !hasDateFilter) {
           const da = a.date ? new Date(a.date).getTime() : Infinity;
           const db = b.date ? new Date(b.date).getTime() : Infinity;
           return da - db;
         }
-        // Date filter active → sort by distance
         if (hasDateFilter && !hasCityFilter) {
           if (a.distance === null && b.distance === null) return 0;
           if (a.distance === null) return 1;
           if (b.distance === null) return -1;
           return a.distance - b.distance;
         }
-        // Default: distance-based sort
         if (a.distance === null && b.distance === null) return 0;
         if (a.distance === null) return 1;
         if (b.distance === null) return -1;
@@ -266,8 +260,8 @@ const Explore: React.FC = () => {
   }, [freelancers, searchTerm, userLocation, currentUser]);
 
   const eliteFreelancers = useMemo(() =>
-    freelancers.filter(f => f.rate >= 4.8 && f.id !== currentUser?.id).slice(0, 5),
-    [freelancers, currentUser]
+    freelancersWithDistance.filter(f => f.rate >= 4.8 && f.id !== currentUser?.id).slice(0, 5),
+    [freelancersWithDistance, currentUser]
   );
 
   const myJobs = useMemo(() =>
@@ -280,11 +274,11 @@ const Explore: React.FC = () => {
     if (!currentUser) return;
     if (myMatches.some(m => m.job_id === jobId)) return;
     try {
-      const { data, error } = await supabase.from('matches').insert({
+      const { error } = await supabase.from('matches').insert({
         job_id: jobId, freelancer_id: currentUser.id, status: 'Pending'
-      }).select().single();
+      });
       if (error) throw error;
-      setMyMatches([...myMatches, data]);
+      refetchAll();
     } catch (err) {
       console.error(err);
     }
@@ -335,7 +329,7 @@ const Explore: React.FC = () => {
         </div>
       </header>
 
-      <CreateJobModal isOpen={isModalOpen} onClose={() => { setIsModalOpen(false); fetchData(); }} />
+      <CreateJobModal isOpen={isModalOpen} onClose={() => { setIsModalOpen(false); refetchAll(); }} />
 
       <main className="px-6 py-8 space-y-8 max-w-2xl mx-auto animate-in fade-in duration-500">
 
@@ -498,9 +492,21 @@ const Explore: React.FC = () => {
                     className="group bg-[#1A1A1A] border border-white/5 rounded-[32px] p-6 transition-all duration-500 hover:border-[#8A2BE2]/30 hover:bg-[#222] shadow-2xl cursor-pointer"
                   >
                     <div className="flex justify-between items-start gap-3">
-                      <div className="space-y-1 flex-1 min-w-0">
+                      <div className="space-y-2 flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-[10px] font-black text-[#8A2BE2] uppercase tracking-[0.2em]">{job.type}</span>
+                          {/* Clickable Job Type Tags */}
+                          {(job.type || 'Job').split(',').map((t: string) => t.trim()).map((t: string, i: number) => (
+                            <button
+                              key={i}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSearchTerm(t);
+                              }}
+                              className="text-[9px] font-black text-[#8A2BE2] uppercase tracking-wider bg-[#8A2BE2]/10 hover:bg-[#8A2BE2]/25 border border-[#8A2BE2]/20 hover:border-[#8A2BE2]/40 px-2 py-0.5 rounded-md transition-all z-10"
+                            >
+                              {t}
+                            </button>
+                          ))}
                           {/* Distance Badge */}
                           {job.distance !== null && (
                             <span className={`text-[10px] font-black uppercase tracking-wider px-2.5 py-1 rounded-full border ${distanceBadgeColor(job.distance)}`}>
@@ -529,10 +535,23 @@ const Explore: React.FC = () => {
                         <h3 className="text-xl font-black text-white group-hover:text-[#8A2BE2] transition-colors tracking-tight truncate">
                           {job.title}
                         </h3>
-                        <div className="flex items-center gap-2 text-sm text-gray-400 font-bold">
-                          <Briefcase size={14} />
-                          {job.role}
-                        </div>
+                        {/* Clickable Desired Professional Tags */}
+                        {job.role && (
+                          <div className="flex flex-wrap gap-1 mt-1">
+                            {(job.role || '').split(',').map((r: string) => r.trim()).map((r: string, i: number) => (
+                              <button
+                                key={i}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSearchTerm(r);
+                                }}
+                                className="text-[9px] font-black text-gray-400 bg-white/5 hover:bg-white/10 px-1.5 py-0.5 rounded-md border border-white/10 uppercase transition-all z-10"
+                              >
+                                {r}
+                              </button>
+                            ))}
+                          </div>
+                        )}
                       </div>
                       <div className="text-right flex-shrink-0">
                         <div className="text-sm font-black text-white">{job.value}</div>
@@ -680,25 +699,58 @@ const Explore: React.FC = () => {
           <div className="space-y-6 animate-in slide-in-from-bottom duration-300">
             <div className="flex items-center justify-between px-2">
               <h2 className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em]">Suas Vagas Publicadas</h2>
+              <span className="text-xs font-medium text-[#8A2BE2]">{myAllJobs.length} vagas</span>
             </div>
-            {myJobs.length > 0 ? myJobs.map(job => (
-              <div
-                key={job.id}
-                onClick={() => navigate(`/jobs/${job.id}`)}
-                className="bg-white/5 border border-white/5 rounded-[32px] p-6 flex items-center justify-between group cursor-pointer hover:bg-white/10 transition-all"
-              >
-                <div className="space-y-1">
-                  <h3 className="text-lg font-black text-white group-hover:text-[#8A2BE2] transition-colors">{job.title}</h3>
-                  <div className="flex items-center gap-4 text-xs font-bold text-gray-500">
-                    <div className="flex items-center gap-1"><Users size={14} /><span>Ver Interessados</span></div>
-                    <div className="flex items-center gap-1"><LayoutGrid size={14} /><span>{job.status}</span></div>
+            {myAllJobsLoading ? (
+              <div className="flex justify-center py-10">
+                <div className="w-8 h-8 border-t-2 border-[#8A2BE2] rounded-full animate-spin" />
+              </div>
+            ) : myAllJobs.length > 0 ? myAllJobs.map(job => {
+              const today = new Date().toISOString().split('T')[0];
+              const isArchived = !!job.deleted_at || (job.date && job.date < today);
+              return (
+                <div
+                  key={job.id}
+                  onClick={() => !isArchived && navigate(`/jobs/${job.id}`)}
+                  className={`bg-white/5 border rounded-[32px] p-6 flex items-center justify-between group transition-all ${
+                    isArchived
+                      ? 'border-white/5 opacity-60 cursor-default'
+                      : 'border-white/5 hover:bg-white/10 hover:border-[#8A2BE2]/20 cursor-pointer'
+                  }`}
+                >
+                  <div className="space-y-1.5 flex-1 min-w-0">
+                    <h3 className={`text-lg font-black transition-colors truncate ${
+                      isArchived ? 'text-gray-500' : 'text-white group-hover:text-[#8A2BE2]'
+                    }`}>{job.title}</h3>
+                    <div className="flex items-center gap-3 flex-wrap text-xs font-bold text-gray-500">
+                      {isArchived ? (
+                        <span className="text-[10px] font-black uppercase tracking-widest text-amber-500/80 bg-amber-500/10 border border-amber-500/20 px-2.5 py-0.5 rounded-full">
+                          {job.deleted_at ? '🗂 Encerrada' : '📅 Expirada'}
+                        </span>
+                      ) : (
+                        <>
+                          <div className="flex items-center gap-1"><Users size={14} /><span>Ver Interessados</span></div>
+                          <div className="flex items-center gap-1"><LayoutGrid size={14} /><span>{job.status}</span></div>
+                          {job.date && (
+                            <div className="flex items-center gap-1 text-[#8A2BE2]">
+                              <Calendar size={12} />
+                              <span>{new Date(job.date + 'T00:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}</span>
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  </div>
+                  <div className={`p-3 rounded-2xl ml-4 shrink-0 shadow-lg transition-all ${
+                    isArchived
+                      ? 'bg-white/5 text-gray-600'
+                      : 'bg-white/5 text-gray-400 group-hover:bg-[#8A2BE2] group-hover:text-white'
+                  }`}>
+                    <Sparkles size={20} />
                   </div>
                 </div>
-                <div className="p-3 bg-white/5 rounded-2xl text-gray-400 group-hover:bg-[#8A2BE2] group-hover:text-white transition-all shadow-lg">
-                  <Sparkles size={20} />
-                </div>
-              </div>
-            )) : (
+              );
+            }) : (
               <div className="text-center py-20 bg-white/5 rounded-[40px] border border-white/5 border-dashed space-y-6">
                 <Briefcase size={40} className="mx-auto text-gray-600" />
                 <div>

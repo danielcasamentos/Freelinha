@@ -2,16 +2,18 @@ import React, { useMemo, useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { 
   ArrowLeft, MapPin, Briefcase, Calendar, DollarSign, 
-  Users, Star, ShieldCheck, Lock, Sparkles, MessageSquare, Phone, CheckCircle
+  Users, Star, ShieldCheck, Lock, Sparkles, MessageSquare, Phone, CheckCircle, Trash2, AlertTriangle
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import Button from '../components/Button';
 import BottomNav from '../components/BottomNav';
 import CreateJobModal from '../components/CreateJobModal';
+import { useApp } from '../lib/AppContext';
 
 const JobDetails: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { vacancies, refetchAll } = useApp();
 
   const [job, setJob] = useState<any>(null);
   const [matches, setMatches] = useState<any[]>([]);
@@ -19,10 +21,21 @@ const JobDetails: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [deleteLoading, setDeleteLoading] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
 
-  const fetchJobAndMatches = async () => {
+  // Load from cache first
+  useEffect(() => {
+    const cached = vacancies.find(v => v.id === id);
+    if (cached) {
+      setJob(cached);
+      setLoading(false);
+    }
+  }, [vacancies, id]);
+
+  const fetchJobAndMatches = async (showSpinner = false) => {
     try {
-      setLoading(true);
+      if (showSpinner) setLoading(true);
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
         navigate('/');
@@ -39,15 +52,15 @@ const JobDetails: React.FC = () => {
       
       if (jobError) throw jobError;
       setJob(jobData);
+      setLoading(false);
 
-      // Fetch matches first
+      // Fetch matches
       const { data: matchesRaw, error: matchesError } = await supabase
         .from('matches')
         .select('*')
         .eq('job_id', id);
 
       if (!matchesError && matchesRaw && matchesRaw.length > 0) {
-        // Enrich each match with profile + freelancer_profile
         const enriched = await Promise.all(
           matchesRaw.map(async (m) => {
             const { data: profile } = await supabase
@@ -77,7 +90,7 @@ const JobDetails: React.FC = () => {
   };
 
   useEffect(() => {
-    fetchJobAndMatches();
+    fetchJobAndMatches(!job);
   }, [id]);
 
   const handleAcceptMatch = async (matchId: string) => {
@@ -89,7 +102,6 @@ const JobDetails: React.FC = () => {
         .eq('id', matchId);
 
       if (error) throw error;
-      // Navigate directly to chat after accepting
       navigate(`/chat?id=${matchId}`);
     } catch (err) {
       console.error(err);
@@ -103,13 +115,11 @@ const JobDetails: React.FC = () => {
     return currentUser && job && job.author_id === currentUser.id;
   }, [currentUser, job]);
 
-  // Check if current user (freelancer) has an accepted match for this job
   const hasAcceptedMatch = useMemo(() => {
     if (!currentUser) return false;
     return matches.some(m => m.freelancer_id === currentUser.id && m.status === 'Accepted');
   }, [currentUser, matches]);
 
-  // Check if current user has any pending interest for this job
   const hasPendingInterest = useMemo(() => {
     if (!currentUser) return false;
     return matches.some(m => m.freelancer_id === currentUser.id && m.status === 'Pending');
@@ -138,6 +148,67 @@ const JobDetails: React.FC = () => {
     }
   };
 
+  const handleIncreaseBudget = async (percentage: number) => {
+    if (!job) return;
+    try {
+      setActionLoading(true);
+      const cleanVal = job.value.replace(/\D/g, '');
+      if (!cleanVal) {
+        alert('Orçamento não pôde ser analisado para aumento automático.');
+        return;
+      }
+      const currentAmount = parseInt(cleanVal, 10);
+      const newAmount = Math.round(currentAmount * (1 + percentage / 100));
+      const newValue = 'R$ ' + newAmount.toLocaleString('pt-BR');
+      
+      const origValue = job.original_value || job.value;
+
+      const { error } = await supabase
+        .from('jobs')
+        .update({ 
+          value: newValue,
+          original_value: origValue
+        })
+        .eq('id', job.id);
+
+      if (error) throw error;
+      
+      // Update global context cache and local state
+      refetchAll();
+      setJob(prev => ({ ...prev, value: newValue, original_value: origValue }));
+      alert(`Orçamento aumentado com sucesso para ${newValue}!`);
+    } catch (err: any) {
+      console.error(err);
+      alert('Erro ao atualizar orçamento: ' + err.message);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleDeleteJob = async () => {
+    if (!job || !currentUser) return;
+    try {
+      setDeleteLoading(true);
+      const { error } = await supabase
+        .from('jobs')
+        .update({ deleted_at: new Date().toISOString() })
+        .eq('id', job.id)
+        .eq('author_id', currentUser.id); // RLS double-check
+
+      if (error) throw error;
+
+      // Remove from global cache
+      refetchAll();
+      setShowDeleteModal(false);
+      navigate('/jobs');
+    } catch (err: any) {
+      console.error(err);
+      alert('Erro ao encerrar a vaga: ' + err.message);
+    } finally {
+      setDeleteLoading(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-[#121212] flex items-center justify-center text-white">
@@ -161,12 +232,21 @@ const JobDetails: React.FC = () => {
           <h1 className="text-xl font-bold text-white">Detalhes da <span className="text-[#8A2BE2]">Vaga</span></h1>
         </div>
         {isAuthor && (
-          <button 
-            onClick={() => setIsEditModalOpen(true)}
-            className="text-xs font-black uppercase tracking-widest bg-[#8A2BE2] hover:bg-[#9D4EDD] text-white px-4 py-2.5 rounded-xl transition-all shadow-[0_4px_12px_rgba(138,43,226,0.3)] active:scale-95 animate-in fade-in duration-300"
-          >
-            Editar Vaga
-          </button>
+          <div className="flex items-center gap-2">
+            <button 
+              onClick={() => setIsEditModalOpen(true)}
+              className="text-xs font-black uppercase tracking-widest bg-[#8A2BE2] hover:bg-[#9D4EDD] text-white px-4 py-2.5 rounded-xl transition-all shadow-[0_4px_12px_rgba(138,43,226,0.3)] active:scale-95 animate-in fade-in duration-300"
+            >
+              Editar Vaga
+            </button>
+            <button 
+              onClick={() => setShowDeleteModal(true)}
+              className="p-2.5 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 hover:border-red-500/40 text-red-400 rounded-xl transition-all active:scale-95"
+              title="Encerrar vaga"
+            >
+              <Trash2 size={18} />
+            </button>
+          </div>
         )}
       </header>
 
@@ -176,9 +256,13 @@ const JobDetails: React.FC = () => {
           <div className="absolute -top-12 -right-12 w-32 h-32 bg-[#8A2BE2]/10 blur-3xl rounded-full"></div>
           
           <div className="space-y-2 relative z-10">
-            <div className="flex items-center gap-2 text-[#8A2BE2] text-[10px] font-black uppercase tracking-widest">
+            <div className="flex items-center gap-2 flex-wrap text-[#8A2BE2] text-[10px] font-black uppercase tracking-widest">
                 <Sparkles size={12} />
-                {job.type}
+                {(job.type || 'Job').split(',').map((t: string) => t.trim()).map((t: string, i: number) => (
+                  <span key={i} className="bg-[#8A2BE2]/10 px-2.5 py-0.5 rounded-md border border-[#8A2BE2]/20 uppercase">
+                    {t}
+                  </span>
+                ))}
             </div>
             <h2 className="text-3xl font-black text-white tracking-tight">{job.title}</h2>
           </div>
@@ -199,11 +283,16 @@ const JobDetails: React.FC = () => {
                 </div>
                 <div>
                     <p className="text-[10px] text-gray-500 font-bold uppercase tracking-wider">Investimento</p>
-                    <p className="text-sm font-bold text-white">{job.value}</p>
+                    <div className="flex flex-col">
+                      <p className="text-sm font-bold text-white">{job.value}</p>
+                      {job.original_value && job.original_value !== job.value && (
+                        <p className="text-[9px] text-gray-500 line-through">Anterior: {job.original_value}</p>
+                      )}
+                    </div>
                 </div>
             </div>
             {job.date && (
-              <div className="flex items-center gap-3 col-span-2">
+              <div className="flex items-center gap-3 col-span-2 border-t border-white/5 pt-3">
                   <div className="p-2.5 bg-[#8A2BE2]/10 rounded-xl text-[#8A2BE2]">
                       <Calendar size={18} />
                   </div>
@@ -214,6 +303,23 @@ const JobDetails: React.FC = () => {
                           weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'
                         })}
                       </p>
+                  </div>
+              </div>
+            )}
+            {job.role && (
+              <div className="flex items-start gap-3 col-span-2 border-t border-white/5 pt-3">
+                  <div className="p-2.5 bg-white/5 rounded-xl text-gray-400 shrink-0">
+                      <Briefcase size={18} />
+                  </div>
+                  <div>
+                      <p className="text-[10px] text-gray-500 font-bold uppercase tracking-wider mb-1.5">Profissionais Desejados</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {job.role.split(',').map((r: string) => r.trim()).map((r: string, i: number) => (
+                          <span key={i} className="text-[10px] font-bold text-white bg-white/10 border border-white/10 px-2.5 py-1 rounded-lg uppercase">
+                            {r}
+                          </span>
+                        ))}
+                      </div>
                   </div>
               </div>
             )}
@@ -267,6 +373,47 @@ const JobDetails: React.FC = () => {
           <Button fullWidth onClick={handleExpressInterest} disabled={actionLoading} className="bg-[#8A2BE2] hover:bg-[#9D4EDD] py-4 text-xs font-black uppercase tracking-widest rounded-2xl shadow-xl">
             {actionLoading ? 'Processando...' : 'Tenho Interesse nesta Vaga'}
           </Button>
+        )}
+
+        {/* Smart budget suggestion for creator */}
+        {isAuthor && (
+          <section className="bg-white/5 border border-white/10 rounded-[32px] p-6 space-y-4 relative overflow-hidden animate-in fade-in duration-300">
+            <div className="flex items-start gap-4">
+              <div className="p-3 bg-[#8A2BE2]/10 border border-[#8A2BE2]/20 rounded-2xl text-[#8A2BE2] shrink-0">
+                <Sparkles size={20} />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-sm font-black text-white uppercase tracking-wider">Aumentar Orçamento do Projeto</h3>
+                <p className="text-xs text-gray-400 leading-relaxed">
+                  Não está conseguindo candidatos qualificados? Aumentar o valor atrai mais profissionais e melhora a qualidade do match.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex gap-3 pt-2">
+              <button
+                onClick={() => handleIncreaseBudget(10)}
+                disabled={actionLoading}
+                className="flex-1 py-3 bg-white/5 hover:bg-[#8A2BE2]/20 border border-white/10 hover:border-[#8A2BE2]/40 rounded-xl text-xs font-bold text-white transition-all hover:scale-[1.02] active:scale-[0.98]"
+              >
+                +10%
+              </button>
+              <button
+                onClick={() => handleIncreaseBudget(20)}
+                disabled={actionLoading}
+                className="flex-1 py-3 bg-white/5 hover:bg-[#8A2BE2]/20 border border-white/10 hover:border-[#8A2BE2]/40 rounded-xl text-xs font-bold text-white transition-all hover:scale-[1.02] active:scale-[0.98]"
+              >
+                +20%
+              </button>
+              <button
+                onClick={() => handleIncreaseBudget(50)}
+                disabled={actionLoading}
+                className="flex-1 py-3 bg-white/5 hover:bg-[#8A2BE2]/20 border border-white/10 hover:border-[#8A2BE2]/40 rounded-xl text-xs font-bold text-white transition-all hover:scale-[1.02] active:scale-[0.98]"
+              >
+                +50%
+              </button>
+            </div>
+          </section>
         )}
 
         {/* Smart Suggestions & Match Management (For Job Creator) */}
@@ -365,6 +512,49 @@ const JobDetails: React.FC = () => {
         }} 
         jobToEdit={job} 
       />
+
+      {/* Delete confirmation modal */}
+      {showDeleteModal && (
+        <div className="fixed inset-0 z-[9999] flex items-end justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="w-full max-w-sm bg-[#1A1A1A] border border-white/10 rounded-[32px] p-7 space-y-6 animate-in slide-in-from-bottom duration-300">
+            {/* Icon */}
+            <div className="flex justify-center">
+              <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-2xl">
+                <AlertTriangle size={28} className="text-red-400" />
+              </div>
+            </div>
+
+            {/* Copy */}
+            <div className="text-center space-y-2">
+              <h3 className="text-lg font-black text-white">Encerrar Vaga?</h3>
+              <p className="text-sm text-gray-400 leading-relaxed">
+                A vaga <span className="text-white font-bold">&ldquo;{job.title}&rdquo;</span> será removida do feed.
+              </p>
+              <p className="text-xs text-gray-500 leading-relaxed">
+                Suas conversas e matches com freelas ficam <span className="text-[#8A2BE2] font-bold">preservados</span> na sua caixa de mensagens.
+              </p>
+            </div>
+
+            {/* Actions */}
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowDeleteModal(false)}
+                disabled={deleteLoading}
+                className="flex-1 py-3.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-2xl text-sm font-black text-gray-300 uppercase tracking-wider transition-all"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleDeleteJob}
+                disabled={deleteLoading}
+                className="flex-1 py-3.5 bg-red-500 hover:bg-red-600 disabled:opacity-60 rounded-2xl text-sm font-black text-white uppercase tracking-wider transition-all shadow-[0_4px_16px_rgba(239,68,68,0.3)] active:scale-95"
+              >
+                {deleteLoading ? 'Encerrando...' : 'Encerrar Vaga'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <BottomNav />
     </div>

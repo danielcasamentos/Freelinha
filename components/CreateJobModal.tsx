@@ -3,7 +3,10 @@ import { X, MapPin, DollarSign, Check, Sparkles, Calendar } from 'lucide-react';
 import Button from './Button';
 import Input from './Input';
 import { supabase } from '../lib/supabase';
-import { MAIN_ROLES } from '../constants';
+import { MAIN_ROLES, SPECIALTIES } from '../constants';
+
+const ALL_SKILLS = [...MAIN_ROLES, ...SPECIALTIES];
+const DEFAULT_JOB_TYPES = ["Casamento", "Publicidade", "Corporativo", "Social"];
 
 interface CreateJobModalProps {
   isOpen: boolean;
@@ -15,48 +18,107 @@ const CreateJobModal: React.FC<CreateJobModalProps> = ({ isOpen, onClose, jobToE
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
   const [formData, setFormData] = useState({
     title: '',
-    type: '',
-    role: '',
     location: '',
     value: '',
     description: '',
     date: ''
   });
 
+  const [selectedTypes, setSelectedTypes] = useState<string[]>([]);
+  const [selectedRoles, setSelectedRoles] = useState<string[]>([]);
+  const [customTypeInput, setCustomTypeInput] = useState('');
+  const [customRoleInput, setCustomRoleInput] = useState('');
+
   useEffect(() => {
     if (jobToEdit && isOpen) {
       setFormData({
         title: jobToEdit.title || '',
-        type: jobToEdit.type || '',
-        role: jobToEdit.role || '',
         location: jobToEdit.location || '',
         value: jobToEdit.value || '',
         description: jobToEdit.description || '',
         date: jobToEdit.date || ''
       });
+      setSelectedTypes(jobToEdit.type ? jobToEdit.type.split(',').map((t: string) => t.trim()) : []);
+      setSelectedRoles(jobToEdit.role ? jobToEdit.role.split(',').map((r: string) => r.trim()) : []);
       setStep(1);
     } else if (isOpen) {
       setFormData({
         title: '',
-        type: '',
-        role: '',
         location: '',
         value: '',
         description: '',
         date: ''
       });
+      setSelectedTypes([]);
+      setSelectedRoles([]);
       setStep(1);
     }
   }, [jobToEdit, isOpen]);
 
   if (!isOpen) return null;
 
+  // Format currency on the fly: R$ X.XXX
+  const formatBRL = (val: string) => {
+    const clean = val.replace(/\D/g, '');
+    if (!clean) return '';
+    const number = parseInt(clean, 10);
+    return 'R$ ' + number.toLocaleString('pt-BR');
+  };
+
+  const handleValueChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const raw = e.target.value;
+    const formatted = formatBRL(raw);
+    setFormData(prev => ({ ...prev, value: formatted }));
+  };
+
+  const toggleType = (type: string) => {
+    setSelectedTypes(prev => {
+      if (prev.includes(type)) {
+        return prev.filter(t => t !== type);
+      }
+      return [...prev, type];
+    });
+  };
+
+  const handleAddCustomType = () => {
+    const trimmed = customTypeInput.trim();
+    if (!trimmed) return;
+    setSelectedTypes(prev => {
+      if (prev.includes(trimmed)) return prev;
+      return [...prev, trimmed];
+    });
+    setCustomTypeInput('');
+  };
+
+  const toggleRole = (role: string) => {
+    setSelectedRoles(prev => {
+      if (prev.includes(role)) {
+        return prev.filter(r => r !== role);
+      }
+      return [...prev, role];
+    });
+  };
+
+  const handleAddCustomRole = () => {
+    const trimmed = customRoleInput.trim();
+    if (!trimmed) return;
+    setSelectedRoles(prev => {
+      if (prev.includes(trimmed)) return prev;
+      return [...prev, trimmed];
+    });
+    setCustomRoleInput('');
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError(null);
+
+    const typeStr = selectedTypes.join(', ') || 'Casamento';
+    const roleStr = selectedRoles.join(', ') || 'Videomaker';
 
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -88,12 +150,13 @@ const CreateJobModal: React.FC<CreateJobModalProps> = ({ isOpen, onClose, jobToE
           .from('jobs')
           .update({
             title: formData.title,
-            type: formData.type || 'Casamento',
-            role: formData.role || 'Videomaker',
+            type: typeStr,
+            role: roleStr,
             location: formData.location || 'São Paulo, SP',
             latitude: lat,
             longitude: lng,
             value: formData.value || 'R$ 1.000',
+            original_value: jobToEdit.original_value || jobToEdit.value || formData.value,
             description: formData.description,
             date: formData.date || null
           })
@@ -105,12 +168,13 @@ const CreateJobModal: React.FC<CreateJobModalProps> = ({ isOpen, onClose, jobToE
           .from('jobs')
           .insert({
             title: formData.title,
-            type: formData.type || 'Casamento',
-            role: formData.role || 'Videomaker',
+            type: typeStr,
+            role: roleStr,
             location: formData.location || 'São Paulo, SP',
             latitude: lat,
             longitude: lng,
             value: formData.value || 'R$ 1.000',
+            original_value: formData.value || 'R$ 1.000',
             description: formData.description,
             date: formData.date || null,
             author_id: user.id,
@@ -127,13 +191,13 @@ const CreateJobModal: React.FC<CreateJobModalProps> = ({ isOpen, onClose, jobToE
         setStep(1);
         setFormData({
           title: '',
-          type: '',
-          role: '',
           location: '',
           value: '',
           description: '',
           date: ''
         });
+        setSelectedTypes([]);
+        setSelectedRoles([]);
       }, 2000);
     } catch (err: any) {
       console.error(err);
@@ -143,20 +207,22 @@ const CreateJobModal: React.FC<CreateJobModalProps> = ({ isOpen, onClose, jobToE
     }
   };
 
+  const isStep1Disabled = !formData.title || selectedTypes.length === 0 || selectedRoles.length === 0;
+
   return (
     <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center bg-black/80 backdrop-blur-sm animate-in fade-in duration-300">
-      <div className="bg-[#1A1A1A] w-full max-w-lg rounded-t-[32px] sm:rounded-[32px] border border-white/10 shadow-2xl overflow-hidden animate-in slide-in-from-bottom duration-500">
+      <div className="bg-[#1A1A1A] w-full max-w-lg rounded-t-[32px] sm:rounded-[32px] border border-white/10 shadow-2xl overflow-hidden animate-in slide-in-from-bottom duration-500 max-h-[90vh] flex flex-col">
         
         {/* Progress Bar */}
-        <div className="h-1.5 w-full bg-gray-800">
+        <div className="h-1.5 w-full bg-gray-800 shrink-0">
             <div 
                 className="h-full bg-[#8A2BE2] transition-all duration-500" 
                 style={{ width: `${(step / 3) * 100}%` }}
             />
         </div>
 
-        <div className="p-8">
-          <div className="flex justify-between items-center mb-8">
+        <div className="p-8 overflow-y-auto flex-1">
+          <div className="flex justify-between items-center mb-6">
             <div>
               <h2 className="text-2xl font-black text-white">{jobToEdit ? 'Editar' : 'Postar'} <span className="text-[#8A2BE2]">Vaga</span></h2>
               <p className="text-xs text-gray-500 font-bold uppercase tracking-widest mt-1">Passo {step} de 3</p>
@@ -174,7 +240,7 @@ const CreateJobModal: React.FC<CreateJobModalProps> = ({ isOpen, onClose, jobToE
 
           {step === 1 && (
             <div className="space-y-6 animate-in slide-in-from-right duration-300">
-              <div className="space-y-4">
+              <div className="space-y-5">
                 <Input 
                   label="Título do Projeto"
                   placeholder="Ex: Casamento na Praia, Vídeo Institucional..."
@@ -182,40 +248,133 @@ const CreateJobModal: React.FC<CreateJobModalProps> = ({ isOpen, onClose, jobToE
                   onChange={(e) => setFormData({...formData, title: e.target.value})}
                   required
                 />
-                <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                        <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest ml-1">Tipo</label>
-                        <select 
-                            className="w-full bg-[#222] border border-white/10 rounded-2xl p-4 text-white text-sm focus:border-[#8A2BE2]/50 outline-none transition-all appearance-none"
-                            value={formData.type}
-                            onChange={(e) => setFormData({...formData, type: e.target.value})}
+
+                {/* Job Type Selector */}
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest ml-1">Tipo de Trabalho da Vaga</label>
+                  
+                  {/* Default types pills */}
+                  <div className="flex flex-wrap gap-2">
+                    {DEFAULT_JOB_TYPES.map(type => {
+                      const isSelected = selectedTypes.includes(type);
+                      return (
+                        <button
+                          key={type}
+                          type="button"
+                          onClick={() => toggleType(type)}
+                          className={`text-xs px-3.5 py-2 rounded-xl border transition-all font-bold
+                            ${isSelected
+                              ? 'bg-[#8A2BE2] border-[#8A2BE2] text-white shadow-[0_0_12px_rgba(138,43,226,0.3)]'
+                              : 'bg-white/5 border-white/10 text-gray-400 hover:border-[#8A2BE2]/40 hover:text-white'}`}
                         >
-                            <option value="">Selecione...</option>
-                            <option value="Casamento">Casamento</option>
-                            <option value="Publicidade">Publicidade</option>
-                            <option value="Corporativo">Corporativo</option>
-                            <option value="Social">Social</option>
-                        </select>
-                    </div>
-                    <div className="space-y-2">
-                        <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest ml-1">Profissional Desejado</label>
-                        <input 
-                            list="job-roles-list"
-                            className="w-full bg-[#222] border border-white/10 rounded-2xl p-4 text-white text-sm focus:border-[#8A2BE2]/50 outline-none transition-all placeholder-gray-600"
-                            placeholder="Selecione ou digite..."
-                            value={formData.role}
-                            onChange={(e) => setFormData({...formData, role: e.target.value})}
-                            required
-                        />
-                        <datalist id="job-roles-list">
-                          {MAIN_ROLES.map(role => (
-                            <option key={role} value={role} />
-                          ))}
-                        </datalist>
-                    </div>
+                          {type}
+                        </button>
+                      );
+                    })}
+
+                    {/* Custom added types pills */}
+                    {selectedTypes.filter(t => !DEFAULT_JOB_TYPES.includes(t)).map(type => (
+                      <button
+                        key={type}
+                        type="button"
+                        onClick={() => toggleType(type)}
+                        className="text-xs px-3.5 py-2 rounded-xl border transition-all font-bold bg-[#8A2BE2] border-[#8A2BE2] text-white shadow-[0_0_12px_rgba(138,43,226,0.3)] flex items-center gap-1 animate-in zoom-in duration-200"
+                      >
+                        {type}
+                        <X size={12} className="opacity-60 hover:opacity-100" />
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Add Custom Type input */}
+                  <div className="flex gap-2 pt-1">
+                    <input
+                      type="text"
+                      placeholder="Outro tipo de trabalho..."
+                      value={customTypeInput}
+                      onChange={e => setCustomTypeInput(e.target.value)}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleAddCustomType();
+                        }
+                      }}
+                      className="flex-1 bg-white/5 border border-white/10 rounded-xl px-3.5 py-2 text-white text-xs placeholder-gray-600 focus:outline-none focus:border-[#8A2BE2]/50 transition-all"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleAddCustomType}
+                      className="bg-white/10 hover:bg-white/15 border border-white/5 text-white px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all"
+                    >
+                      + Add
+                    </button>
+                  </div>
+                </div>
+
+                {/* Desired Professional Selector */}
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest ml-1">Profissionais / Habilidades Desejadas</label>
+                  <p className="text-[9px] text-gray-600 font-bold ml-1">Selecione uma ou mais habilidades ou adicione especialidades</p>
+                  
+                  {/* Grid / list of predefined roles */}
+                  <div className="flex flex-wrap gap-1.5 max-h-36 overflow-y-auto p-2 bg-[#222] rounded-xl border border-white/5">
+                    {ALL_SKILLS.map(role => {
+                      const isSelected = selectedRoles.includes(role);
+                      return (
+                        <button
+                          key={role}
+                          type="button"
+                          onClick={() => toggleRole(role)}
+                          className={`text-[10px] px-2.5 py-1.5 rounded-lg border transition-all font-bold
+                            ${isSelected
+                              ? 'bg-[#8A2BE2] border-[#8A2BE2] text-white'
+                              : 'bg-white/5 border-white/5 text-gray-400 hover:text-white'}`}
+                        >
+                          {role}
+                        </button>
+                      );
+                    })}
+
+                    {/* Custom added roles pills */}
+                    {selectedRoles.filter(r => !ALL_SKILLS.includes(r)).map(role => (
+                      <button
+                        key={role}
+                        type="button"
+                        onClick={() => toggleRole(role)}
+                        className="text-[10px] px-2.5 py-1.5 rounded-lg border transition-all font-bold bg-[#8A2BE2] border-[#8A2BE2] text-white flex items-center gap-1 animate-in zoom-in duration-200"
+                      >
+                        {role}
+                        <X size={10} className="opacity-60 hover:opacity-100" />
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Add Custom Role/Specialty input */}
+                  <div className="flex gap-2 pt-1">
+                    <input
+                      type="text"
+                      placeholder="Ex: Roteirista de Humor, Animador 3D..."
+                      value={customRoleInput}
+                      onChange={e => setCustomRoleInput(e.target.value)}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleAddCustomRole();
+                        }
+                      }}
+                      className="flex-1 bg-white/5 border border-white/10 rounded-xl px-3.5 py-2 text-white text-xs placeholder-gray-600 focus:outline-none focus:border-[#8A2BE2]/50 transition-all"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleAddCustomRole}
+                      className="bg-white/10 hover:bg-white/15 border border-white/5 text-white px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all"
+                    >
+                      + Add
+                    </button>
+                  </div>
                 </div>
               </div>
-              <Button fullWidth onClick={() => setStep(2)} disabled={!formData.title || !formData.type || !formData.role}>Próximo Passo</Button>
+              <Button fullWidth onClick={() => setStep(2)} disabled={isStep1Disabled}>Próximo Passo</Button>
             </div>
           )}
 
@@ -232,12 +391,13 @@ const CreateJobModal: React.FC<CreateJobModalProps> = ({ isOpen, onClose, jobToE
                 />
                 <Input 
                   label="Orçamento Estimado"
-                  placeholder="R$ 1.500,00"
+                  placeholder="R$ 1.500"
                   icon={<DollarSign size={18} />}
                   value={formData.value}
-                  onChange={(e) => setFormData({...formData, value: e.target.value})}
+                  onChange={handleValueChange}
                   required
                 />
+                
                 {/* Event Date field — prominent with calendar icon */}
                 <div className="space-y-2">
                   <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest ml-1">Data do Evento</label>
@@ -266,6 +426,7 @@ const CreateJobModal: React.FC<CreateJobModalProps> = ({ isOpen, onClose, jobToE
                     );
                   })()}
                 </div>
+
                 <div className="space-y-2">
                     <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest ml-1">Descrição do Trabalho</label>
                     <textarea 

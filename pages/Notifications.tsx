@@ -47,130 +47,105 @@ const statusLabel: Record<string, { label: string; color: string; icon: React.Re
   Rejected: { label: 'Não selecionado', color: 'text-red-400 bg-red-500/10 border-red-500/20',     icon: <XCircle size={12} /> },
 };
 
+import { useApp } from '../lib/AppContext';
+
 const Notifications: React.FC = () => {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<'tracking' | 'recommended'>('tracking');
 
-  const [currentUser, setCurrentUser]             = useState<any>(null);
-  const [myProfile, setMyProfile]                 = useState<any>(null);
-  const [myFreelancerProfile, setMyFreelancerProfile] = useState<any>(null);
+  // Grab cached global state and actions
+  const {
+    currentUser,
+    myProfile,
+    myFreelancerProfile,
+    vacancies,
+    freelancers,
+    myMatches,
+    loading,
+    refetchAll
+  } = useApp();
 
-  // Freelancer side: my applications
-  const [myApplications, setMyApplications]       = useState<any[]>([]);
-  // Producer side: candidates on my jobs
-  const [myCandidates, setMyCandidates]           = useState<any[]>([]);
-  // Recommended jobs
-  const [recommendedJobs, setRecommendedJobs]     = useState<any[]>([]);
-  const [myMatches, setMyMatches]                 = useState<any[]>([]);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
 
-  const [loading, setLoading]                     = useState(true);
-  const [actionLoading, setActionLoading]         = useState<string | null>(null);
+  // Trigger a background refresh of the cache on mount
+  useEffect(() => {
+    refetchAll();
+  }, [refetchAll]);
 
-  const fetchAll = async () => {
-    try {
-      setLoading(true);
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) { navigate('/'); return; }
-      setCurrentUser(user);
+  // Construct applications list in memory
+  const myApplications = useMemo(() => {
+    if (!currentUser) return [];
+    return myMatches
+      .filter((m: any) => m.freelancer_id === currentUser.id)
+      .map((m: any) => {
+        const job = vacancies.find((j: any) => j.id === m.job_id);
+        return { ...m, job };
+      });
+  }, [myMatches, vacancies, currentUser]);
 
-      // Fetch own profile
-      const { data: profile } = await supabase.from('profiles').select('*').eq('id', user.id).single();
-      setMyProfile(profile);
+  // Construct candidates list in memory
+  const myCandidates = useMemo(() => {
+    if (!currentUser) return [];
+    const myJobIds = vacancies
+      .filter((j: any) => j.author_id === currentUser.id)
+      .map((j: any) => j.id);
 
-      const { data: freelaProfile } = await supabase.from('freelancer_profiles').select('*').eq('id', user.id).single();
-      setMyFreelancerProfile(freelaProfile);
+    return myMatches
+      .filter((m: any) => myJobIds.includes(m.job_id))
+      .map((m: any) => {
+        const job = vacancies.find((j: any) => j.id === m.job_id);
+        const freelancerWithProfile = freelancers.find((f: any) => f.id === m.freelancer_id);
+        return {
+          ...m,
+          job,
+          freelancer: freelancerWithProfile?.profile,
+          freelancer_profile: freelancerWithProfile
+        };
+      });
+  }, [myMatches, vacancies, freelancers, currentUser]);
 
-      // ── Freelancer side: my applications ──
-      const { data: appRaw } = await supabase
-        .from('matches')
-        .select('*')
-        .eq('freelancer_id', user.id);
+  // Construct recommended jobs matching any of the user's functions/skills
+  const recommendedJobs = useMemo(() => {
+    if (!currentUser) return [];
+    const funcoes: string[] = myFreelancerProfile?.funcoes || (myProfile?.role ? [myProfile.role] : []);
+    if (funcoes.length === 0) return [];
 
-      if (appRaw && appRaw.length > 0) {
-        const enriched = await Promise.all(
-          appRaw.map(async (m: any) => {
-            const { data: job } = await supabase.from('jobs').select('*, author:profiles(*)').eq('id', m.job_id).single();
-            return { ...m, job };
-          })
-        );
-        setMyApplications(enriched);
-      } else {
-        setMyApplications([]);
-      }
+    const otherJobs = vacancies.filter((j: any) => j.status === 'Open' && j.author_id !== currentUser.id);
+    const appliedIds = new Set(myMatches.filter((m: any) => m.freelancer_id === currentUser.id).map((m: any) => m.job_id));
 
-      // ── Producer side: candidates on my jobs ──
-      const { data: myJobs } = await supabase.from('jobs').select('id, title').eq('author_id', user.id);
-      if (myJobs && myJobs.length > 0) {
-        const jobIds = myJobs.map((j: any) => j.id);
-        const { data: candidatesRaw } = await supabase
-          .from('matches')
-          .select('*')
-          .in('job_id', jobIds);
-
-        if (candidatesRaw && candidatesRaw.length > 0) {
-          const enriched = await Promise.all(
-            candidatesRaw.map(async (m: any) => {
-              const { data: fp } = await supabase.from('freelancer_profiles').select('*').eq('id', m.freelancer_id).single();
-              const { data: p }  = await supabase.from('profiles').select('*').eq('id', m.freelancer_id).single();
-              const job = myJobs.find((j: any) => j.id === m.job_id);
-              return { ...m, freelancer: p, freelancer_profile: fp, job };
-            })
-          );
-          setMyCandidates(enriched);
-        } else {
-          setMyCandidates([]);
+    return otherJobs
+      .filter((job: any) => {
+        // Match if at least one role in job.role overlaps with user's funcoes
+        const jobRoles = job.role ? job.role.split(',').map((r: string) => r.trim().toLowerCase()) : [];
+        return jobRoles.some((r: string) => funcoes.map(f => f.toLowerCase()).includes(r));
+      })
+      .map((job: any) => {
+        const sameCity = isSameCity(myProfile?.city, myProfile?.state, job.location);
+        let dist = (myFreelancerProfile?.latitude && myFreelancerProfile?.longitude && job.latitude && job.longitude)
+          ? getDistance(myFreelancerProfile.latitude, myFreelancerProfile.longitude, job.latitude, job.longitude)
+          : null;
+        if (sameCity && (dist === null || dist > 150)) {
+          dist = 0.1;
         }
-      }
-
-      // ── Recommended jobs: matching any of the freelancer's funcoes ──
-      const funcoes: string[] = freelaProfile?.funcoes || (profile?.role ? [profile.role] : []);
-      if (funcoes.length > 0) {
-        const { data: allJobs } = await supabase
-          .from('jobs')
-          .select('*, author:profiles(*)')
-          .eq('status', 'Open')
-          .neq('author_id', user.id);
-
-        const { data: existingMatches } = await supabase.from('matches').select('job_id').eq('freelancer_id', user.id);
-        const appliedIds = new Set((existingMatches || []).map((m: any) => m.job_id));
-        setMyMatches(existingMatches || []);
-
-        const matched = (allJobs || []).filter((j: any) => funcoes.includes(j.role));
-        const withDist = matched.map((j: any) => {
-          const sameCity = isSameCity(profile?.city, profile?.state, j.location);
-          let dist = (freelaProfile?.latitude && freelaProfile?.longitude && j.latitude && j.longitude)
-            ? getDistance(freelaProfile.latitude, freelaProfile.longitude, j.latitude, j.longitude)
-            : null;
-          if (sameCity && (dist === null || dist > 150)) {
-            dist = 0.1;
-          }
-          return {
-            ...j,
-            alreadyApplied: appliedIds.has(j.id),
-            distance: dist,
-          };
-        }).sort((a: any, b: any) => {
-          if (a.distance === null && b.distance === null) return 0;
-          if (a.distance === null) return 1;
-          if (b.distance === null) return -1;
-          return a.distance - b.distance;
-        });
-        setRecommendedJobs(withDist);
-      }
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => { fetchAll(); }, []);
+        return {
+          ...job,
+          alreadyApplied: appliedIds.has(job.id),
+          distance: dist
+        };
+      })
+      .sort((a: any, b: any) => {
+        if (a.distance === null && b.distance === null) return 0;
+        if (a.distance === null) return 1;
+        if (b.distance === null) return -1;
+        return a.distance - b.distance;
+      });
+  }, [vacancies, myMatches, myProfile, myFreelancerProfile, currentUser]);
 
   const handleAccept = async (matchId: string) => {
     setActionLoading(matchId);
     try {
       await supabase.from('matches').update({ status: 'Accepted' }).eq('id', matchId);
-      await fetchAll();
+      await refetchAll();
       navigate(`/chat?id=${matchId}`);
     } catch (err) {
       console.error(err);
@@ -183,7 +158,7 @@ const Notifications: React.FC = () => {
     setActionLoading(matchId);
     try {
       await supabase.from('matches').update({ status: 'Rejected' }).eq('id', matchId);
-      await fetchAll();
+      await refetchAll();
     } catch (err) {
       console.error(err);
     } finally {
@@ -196,7 +171,7 @@ const Notifications: React.FC = () => {
     setActionLoading(jobId);
     try {
       await supabase.from('matches').insert({ job_id: jobId, freelancer_id: currentUser.id, status: 'Pending' });
-      await fetchAll();
+      await refetchAll();
     } catch (err) {
       console.error(err);
     } finally {
@@ -410,8 +385,16 @@ const Notifications: React.FC = () => {
                   >
                     <div className="flex justify-between items-start gap-3">
                       <div className="space-y-1 flex-1 min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-[10px] font-black text-[#8A2BE2] uppercase tracking-[0.2em]">{job.type}</span>
+                        <div className="flex items-center gap-2 flex-wrap mb-1">
+                          {/* Clickable Job Type Tags */}
+                          {(job.type || 'Job').split(',').map((t: string) => t.trim()).map((t: string, i: number) => (
+                            <span
+                              key={i}
+                              className="text-[9px] font-black text-[#8A2BE2] uppercase tracking-wider bg-[#8A2BE2]/10 border border-[#8A2BE2]/20 px-2 py-0.5 rounded-md"
+                            >
+                              {t}
+                            </span>
+                          ))}
                           {job.distance !== null && (
                             <span className={`text-[10px] font-black px-2 py-0.5 rounded-full border ${distanceBadgeColor(job.distance)}`}>
                               📍 {formatDistance(job.distance, isSameCity(myProfile?.city, myProfile?.state, job.location))}
@@ -421,11 +404,18 @@ const Notifications: React.FC = () => {
                         <h3 className="text-lg font-black text-white group-hover:text-[#8A2BE2] transition-colors tracking-tight truncate">
                           {job.title}
                         </h3>
-                        <div className="flex items-center gap-2 text-sm text-gray-400 font-bold">
-                          <Briefcase size={12} /> {job.role}
-                          <span className="text-gray-600">·</span>
-                          <MapPin size={12} /> {job.location}
-                        </div>
+                        {job.role && (
+                          <div className="flex flex-wrap gap-1 mt-1">
+                            {(job.role || '').split(',').map((r: string) => r.trim()).map((r: string, i: number) => (
+                              <span
+                                key={i}
+                                className="text-[9px] font-black text-gray-400 bg-white/5 px-1.5 py-0.5 rounded-md border border-white/10 uppercase"
+                              >
+                                {r}
+                              </span>
+                            ))}
+                          </div>
+                        )}
                       </div>
                       <div className="text-right shrink-0">
                         <div className="text-sm font-black text-white">{job.value}</div>

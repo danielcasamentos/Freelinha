@@ -1,44 +1,15 @@
 
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { Compass, MessageSquare, User, Bell } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { supabase } from '../lib/supabase';
+import { useApp } from '../lib/AppContext';
 
 const BottomNav: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const [pendingCount, setPendingCount] = useState(0);
+  const { pendingCount } = useApp();
 
   const isActive = (path: string) => location.pathname === path;
-
-  useEffect(() => {
-    const fetchPendingCandidates = async () => {
-      try {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) return;
-
-        // Count pending matches on jobs owned by this user
-        const { data: myJobs } = await supabase
-          .from('jobs')
-          .select('id')
-          .eq('author_id', user.id);
-
-        if (myJobs && myJobs.length > 0) {
-          const jobIds = myJobs.map((j: any) => j.id);
-          const { count } = await supabase
-            .from('matches')
-            .select('*', { count: 'exact', head: true })
-            .in('job_id', jobIds)
-            .eq('status', 'Pending');
-          setPendingCount(count || 0);
-        }
-      } catch (err) {
-        // silent fail
-      }
-    };
-
-    fetchPendingCandidates();
-  }, [location.pathname]);
 
   return (
     <div className="fixed bottom-0 left-0 right-0 bg-[#121212]/80 backdrop-blur-2xl border-t border-white/5 pb-safe pt-2 px-6 z-50">
