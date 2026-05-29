@@ -46,10 +46,12 @@ const FreelancerCard: React.FC<FreelancerCardProps> = ({ freelancer }) => {
           </div>
         </div>
         
-        <div className="flex items-center gap-2 mb-3">
-            <span className="text-[#8A2BE2] font-black text-[10px] uppercase tracking-widest bg-[#8A2BE2]/10 px-2 py-0.5 rounded-md">
-                {freelancer.funcoes[0]}
-            </span>
+        <div className="flex items-center gap-1.5 flex-wrap mb-3">
+            {(freelancer.funcoes || []).map((fn, i) => (
+              <span key={i} className="text-[#8A2BE2] font-black text-[10px] uppercase tracking-widest bg-[#8A2BE2]/10 px-2 py-0.5 rounded-md border border-[#8A2BE2]/20">
+                {fn}
+              </span>
+            ))}
             {freelancer.jobsCount > 20 && (
                 <div className="flex items-center gap-1 text-[10px] font-bold text-gray-500 uppercase tracking-widest">
                     <ShieldCheck size={12} />

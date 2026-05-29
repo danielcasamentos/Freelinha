@@ -7,6 +7,7 @@ import MyProfile from './pages/MyProfile';
 import Chat from './pages/Chat';
 import Explore from './pages/JobsFeed'; // Keep filename but rename component internally or use alias
 import JobDetails from './pages/JobDetails';
+import Notifications from './pages/Notifications';
 
 const App: React.FC = () => {
   return (
@@ -21,6 +22,7 @@ const App: React.FC = () => {
           <Route path="/profile/:username" element={<Profile />} />
           <Route path="/my-profile" element={<MyProfile />} />
           <Route path="/chat" element={<Chat />} />
+          <Route path="/notifications" element={<Notifications />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </div>

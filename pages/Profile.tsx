@@ -124,9 +124,11 @@ const Profile: React.FC = () => {
 
         <h1 className="mt-6 text-3xl font-black text-white text-center tracking-tight">{freelancer.first_name} {freelancer.last_name}</h1>
         <div className="flex flex-wrap justify-center gap-2 mt-2">
-            <span className="text-[#8A2BE2] text-[10px] font-black uppercase tracking-widest bg-[#8A2BE2]/10 px-3 py-1 rounded-full border border-[#8A2BE2]/20">
-                {freelancer.role}
+          {(fProfile?.funcoes?.length ? fProfile.funcoes : [freelancer.role]).map((fn: string) => (
+            <span key={fn} className="text-[#8A2BE2] text-[10px] font-black uppercase tracking-widest bg-[#8A2BE2]/10 px-3 py-1 rounded-full border border-[#8A2BE2]/20">
+              {fn}
             </span>
+          ))}
         </div>
         
         <div className="flex items-center gap-2 mt-4 text-gray-500 text-sm font-bold uppercase tracking-widest">
@@ -182,13 +184,13 @@ const Profile: React.FC = () => {
         <section className="bg-white/5 rounded-3xl p-8 border border-white/5 space-y-4">
           <h3 className="text-sm font-black text-[#8A2BE2] uppercase tracking-[0.2em]">Informações de Contato</h3>
           {isContactVisible ? (
-            <div className="flex items-center justify-between p-4 bg-green-500/10 border border-green-500/20 rounded-2xl animate-pulse">
+            <div className="flex items-center justify-between p-4 bg-green-500/10 border border-green-500/20 rounded-2xl">
               <div>
                 <p className="text-[10px] text-green-400 font-black uppercase tracking-widest">WhatsApp Liberado (Match!)</p>
                 <p className="text-lg font-black text-white mt-1">{freelancer.phone}</p>
               </div>
               <a 
-                href={`https://wa.me/${freelancer.phone}`} 
+                href={`https://wa.me/55${(freelancer.phone || '').replace(/\D/g, '')}`} 
                 target="_blank" 
                 rel="noopener noreferrer" 
                 className="p-3 bg-green-500 text-white rounded-xl hover:bg-green-600 transition-all shadow-lg"

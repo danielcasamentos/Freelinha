@@ -388,16 +388,22 @@ const Explore: React.FC = () => {
                         </div>
                         {job.author ? `${job.author.first_name} ${job.author.last_name}` : 'Usuário'}
                       </div>
-                      <button
-                        onClick={e => handleInterest(e, job.id)}
-                        disabled={!!match}
-                        className={`px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all
-                          ${isAccepted ? 'bg-green-500/10 text-green-400 border border-green-500/20'
-                          : isPending ? 'bg-[#8A2BE2]/10 text-[#8A2BE2] border border-[#8A2BE2]/20'
-                          : 'bg-white text-black hover:bg-[#8A2BE2] hover:text-white shadow-lg'}`}
-                      >
-                        {isAccepted ? '✓ MATCH!' : isPending ? 'INTERESSE ENVIADO' : 'TENHO INTERESSE'}
-                      </button>
+                      {job.author_id === currentUser?.id ? (
+                        <span className="px-4 py-2 rounded-2xl text-[10px] font-black uppercase tracking-widest bg-white/5 text-gray-500 border border-white/5">
+                          Sua Vaga
+                        </span>
+                      ) : (
+                        <button
+                          onClick={e => handleInterest(e, job.id)}
+                          disabled={!!match}
+                          className={`px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all
+                            ${isAccepted ? 'bg-green-500/10 text-green-400 border border-green-500/20'
+                            : isPending ? 'bg-[#8A2BE2]/10 text-[#8A2BE2] border border-[#8A2BE2]/20'
+                            : 'bg-white text-black hover:bg-[#8A2BE2] hover:text-white shadow-lg'}`}
+                        >
+                          {isAccepted ? '✓ MATCH!' : isPending ? 'INTERESSE ENVIADO' : 'TENHO INTERESSE'}
+                        </button>
+                      )}
                     </div>
                   </div>
                 );

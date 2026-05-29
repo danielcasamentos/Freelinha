@@ -87,8 +87,8 @@ const JobDetails: React.FC = () => {
         .eq('id', matchId);
 
       if (error) throw error;
-      alert('Match aceito com sucesso! Agora vocês podem trocar contatos.');
-      fetchJobAndMatches();
+      // Navigate directly to chat after accepting
+      navigate(`/chat?id=${matchId}`);
     } catch (err) {
       console.error(err);
       alert('Erro ao aceitar match.');
@@ -218,7 +218,7 @@ const JobDetails: React.FC = () => {
                 <span className="text-[10px] text-gray-500 font-bold uppercase tracking-widest border border-white/5 px-3 py-1.5 rounded-xl bg-white/5">Seu Anúncio</span>
               ) : hasAcceptedMatch ? (
                 <a 
-                  href={`https://wa.me/${job.author?.phone}`} 
+                  href={`https://wa.me/55${(job.author?.phone || '').replace(/\D/g, '')}`} 
                   target="_blank" 
                   rel="noopener noreferrer" 
                   className="flex items-center gap-2 px-4 py-2.5 bg-green-500 text-white rounded-xl text-xs font-black uppercase tracking-widest hover:bg-green-600 transition-all shadow-lg shadow-green-950/20"
@@ -235,7 +235,7 @@ const JobDetails: React.FC = () => {
           </div>
         </section>
 
-        {/* Action Panel for Freelancers */}
+        {/* Action Panel for Freelancers — hide for job owner */}
         {!isAuthor && !hasAcceptedMatch && !hasPendingInterest && (
           <Button fullWidth onClick={handleExpressInterest} disabled={actionLoading} className="bg-[#8A2BE2] hover:bg-[#9D4EDD] py-4 text-xs font-black uppercase tracking-widest rounded-2xl shadow-xl">
             {actionLoading ? 'Processando...' : 'Tenho Interesse nesta Vaga'}
@@ -298,7 +298,7 @@ const JobDetails: React.FC = () => {
                               <CheckCircle size={14} /> Match Aceito!
                             </span>
                             <a 
-                              href={`https://wa.me/${m.freelancer?.phone}`} 
+                              href={`https://wa.me/55${(m.freelancer?.phone || '').replace(/\D/g, '')}`}
                               target="_blank" 
                               rel="noopener noreferrer" 
                               className="p-3 bg-green-500 text-white rounded-xl hover:bg-green-600 transition-all"
@@ -312,7 +312,7 @@ const JobDetails: React.FC = () => {
                             disabled={actionLoading}
                             className="bg-white text-black hover:bg-[#8A2BE2] hover:text-white px-5 py-2.5 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-md"
                           >
-                            Aceitar Match e Ver Telefone
+                            Aceitar Freela
                           </Button>
                         )}
                       </div>
